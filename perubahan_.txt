@@ -361,3 +361,32 @@ File: artifacts/cobol-stream-tool/src/lib/delimit.test.ts
 BEFORE: belum ada test exclude.
 AFTER: tambah assert — exclude NAME → header "CITY", row "PARIS".
 Log: node src/lib/delimit.test.ts lulus semua assert; npx tsc --noEmit bersih.
+
+=== 2026-07-13 (broadcast message admin) ===
+File: artifacts/cobol-stream-tool/src/components/broadcast.tsx (BARU)
+BEFORE: (tidak ada)
+AFTER: fitur broadcast — admin isi Message + Link URL (opsional) + Link text (opsional) lewat dialog "Broadcast" (ikon megaphone). Disimpan di localStorage key "ddm_broadcast". BroadcastBanner menampilkan pesan + hyperlink (buka tab baru); URL tanpa http:// otomatis diprefix https://. Tombol "Clear broadcast" menghapus pengumuman. Kosongkan semua field + Save = hapus juga.
+
+File: artifacts/cobol-stream-tool/src/App.tsx
+BEFORE: header admin hanya tombol Users; main langsung tabs.
+AFTER: tambah tombol Broadcast (khusus alfredo) di header; banner pengumuman tampil di atas tabs untuk semua user yang login.
+
+File: artifacts/cobol-stream-tool/src/components/auth.tsx
+BEFORE: login screen hanya form.
+AFTER: banner pengumuman juga tampil di bawah form login (halaman depan).
+Log: npx tsc --noEmit bersih; PORT=5173 npx vite build sukses. Catatan: broadcast tersimpan per-browser (localStorage), sama seperti daftar user — perlu backend bila harus tampil lintas perangkat.
+
+=== 2026-07-13 (estetika: foto CRT COBOL via taste skill) ===
+File: images_data.jpeg -> artifacts/cobol-stream-tool/public/cobol-code.jpeg (disalin)
+File: artifacts/cobol-stream-tool/src/components/auth.tsx
+BEFORE: panel kiri login pakai cobol.png polos.
+AFTER: panel kiri pakai foto close-up layar CRT kode COBOL (cobol-code.jpeg) + overlay scanline CRT (repeating-linear-gradient) + vignette radial gelap di tepi. Efek layar tabung lebih terasa.
+
+File: artifacts/cobol-stream-tool/src/components/empty-state.tsx (BARU)
+BEFORE: (tidak ada)
+AFTER: komponen EmptyState — kartu dengan foto CRT sebagai latar redup (overlay hitam 65% + scanline), teks mono putih di tengah.
+
+File: generate-tab.tsx, decompose-tab.tsx, delimiter-export-tab.tsx
+BEFORE: pesan kosong = kotak abu-abu polos bg-muted/50.
+AFTER: ketiganya pakai <EmptyState> bertekstur foto CRT. Warna hijau fosfor hanya muncul lewat foto, palet warm monochrome aplikasi tidak berubah.
+Log: tsc --noEmit bersih; vite build sukses.

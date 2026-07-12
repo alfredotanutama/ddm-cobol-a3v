@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { parseCopybook, getRecordLength, decomposeStream } from "@/lib/cobol";
 import { delimitLines, isDataField } from "@/lib/delimit";
+import { EmptyState } from "./empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -179,9 +180,7 @@ export function DelimiterExportTab({
       </div>
 
       {!ready && (copybookSource.trim() || dataSource.trim()) && (
-        <div className="text-sm text-muted-foreground bg-muted/50 p-4 rounded-md border text-center">
-          Upload both a valid copybook and a record lines file to export.
-        </div>
+        <EmptyState>Upload both a valid copybook and a record lines file to export.</EmptyState>
       )}
 
       {ready && (

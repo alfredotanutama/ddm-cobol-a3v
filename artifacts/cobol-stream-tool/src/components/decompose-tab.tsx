@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { parseCopybook, decomposeStream, getRecordLength } from "@/lib/cobol";
 import { FileTextarea } from "./file-textarea";
+import { EmptyState } from "./empty-state";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
@@ -123,9 +124,7 @@ export function DecomposeTab({
       </div>
 
       {(copybookSource.trim() || streamSource.trim()) && results.length === 0 && (
-        <div className="text-sm text-muted-foreground bg-muted/50 p-4 rounded-md border text-center">
-          Provide both a valid copybook and stream data to see decomposition results.
-        </div>
+        <EmptyState>Provide both a valid copybook and stream data to see decomposition results.</EmptyState>
       )}
 
       {results.length > 0 && (

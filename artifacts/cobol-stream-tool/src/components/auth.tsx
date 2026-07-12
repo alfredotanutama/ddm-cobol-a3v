@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { BroadcastBanner, loadBroadcast } from "@/components/broadcast";
 
 export const ADMIN_USER = "alfredo";
 const ADMIN_PASSWORD = "alfredo3gituloh";
@@ -65,9 +66,17 @@ export function LoginScreen({ onLogin }: { onLogin: (user: string) => void }) {
     <div className="min-h-[100dvh] w-full flex bg-background text-foreground font-sans">
       <div className="relative hidden lg:block lg:w-1/2 bg-[#0d0f0d]">
         <img
-          src="/cobol.png"
-          alt="CRT terminal displaying COBOL — Common Business Oriented Language"
+          src="/cobol-code.jpeg"
+          alt="Close-up of a CRT screen showing COBOL MOVE and MODIFY statements"
           className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-[repeating-linear-gradient(0deg,rgba(0,0,0,0.28)_0px,rgba(0,0,0,0.28)_1px,transparent_1px,transparent_3px)]"
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(0,0,0,0.6)_100%)]"
         />
       </div>
       <div className="flex flex-1 items-center justify-center p-4">
@@ -104,6 +113,9 @@ export function LoginScreen({ onLogin }: { onLogin: (user: string) => void }) {
               Login
             </Button>
           </form>
+          <div className="mt-6">
+            <BroadcastBanner broadcast={loadBroadcast()} />
+          </div>
         </CardContent>
       </Card>
       </div>

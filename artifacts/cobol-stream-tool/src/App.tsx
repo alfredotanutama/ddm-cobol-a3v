@@ -18,11 +18,13 @@ import {
   getSessionUser,
   logout,
 } from "@/components/auth";
+import { BroadcastBanner, BroadcastDialog, loadBroadcast } from "@/components/broadcast";
 
 const queryClient = new QueryClient();
 
 function App() {
   const [user, setUser] = useState<string | null>(getSessionUser);
+  const [broadcast, setBroadcast] = useState(loadBroadcast);
   const [activeTab, setActiveTab] = useState("generate");
   const [generateCopybook, setGenerateCopybook] = useState("");
   const [generateValues, setGenerateValues] = useState<Record<string, string>>({});
@@ -95,6 +97,7 @@ function App() {
                   <h1 className="font-semibold tracking-tight text-sm">DDM Stream for COBOLers</h1>
                 </div>
                 <div className="flex items-center gap-2">
+                  {user === ADMIN_USER && <BroadcastDialog onSaved={setBroadcast} />}
                   {user === ADMIN_USER && <UserManagerDialog />}
                   <span className="text-sm text-muted-foreground">{user}</span>
                   <Button
@@ -112,6 +115,11 @@ function App() {
               </div>
             </header>
             <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
+              {broadcast && (
+                <div className="mb-6">
+                  <BroadcastBanner broadcast={broadcast} />
+                </div>
+              )}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-3 max-w-[560px] mb-8">
                   <TabsTrigger value="generate">Generate</TabsTrigger>

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { parseCopybook, generateStream, getRecordLength } from "@/lib/cobol";
 import { FileTextarea } from "./file-textarea";
+import { EmptyState } from "./empty-state";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -199,9 +200,7 @@ export function GenerateTab({
         )}
 
         {copybookSource.trim() && fields.length === 0 && (
-          <div className="text-sm text-muted-foreground bg-muted/50 p-4 rounded-md border text-center">
-            No valid fields found in this copybook.
-          </div>
+          <EmptyState>No valid fields found in this copybook.</EmptyState>
         )}
       </div>
 
