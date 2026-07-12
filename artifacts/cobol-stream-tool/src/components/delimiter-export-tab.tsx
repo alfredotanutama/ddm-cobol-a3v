@@ -4,6 +4,7 @@ import { delimitLines, isDataField } from "@/lib/delimit";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -69,6 +70,8 @@ export function DelimiterExportTab({
   const { toast } = useToast();
   const [delimiterInput, setDelimiterInput] = useState(",");
   const delimiter = delimiterInput || ",";
+  // Field ids the user unchecked — left out of the CSV columns.
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
   const fields = useMemo(() => {
     try {
@@ -85,9 +88,12 @@ export function DelimiterExportTab({
   const lengthMismatch = fields.length > 0 && lines.length > 0 && lines[0].length !== recordLength;
   const ready = fields.length > 0 && lines.length > 0;
 
+  const dataFieldCount = useMemo(() => fields.filter(isDataField).length, [fields]);
+  const includedCount = dataFieldCount - excluded.size;
+
   const preview = useMemo(
-    () => (ready ? delimitLines(fields, lines.slice(0, 5), delimiter) : []),
-    [ready, fields, lines, delimiter],
+    () => (ready ? delimitLines(fields, lines.slice(0, 5), delimiter, excluded) : []),
+    [ready, fields, lines, delimiter, excluded],
   );
 
   // Records whose data contains the delimiter itself — their values get quoted, but warn so
@@ -103,11 +109,11 @@ export function DelimiterExportTab({
     const first = decomposeStream(fields, lines[0]).filter(isDataField);
     const last =
       lines.length > 1 ? decomposeStream(fields, lines[lines.length - 1]).filter(isDataField) : first;
-    return first.map((f, i) => ({ name: f.name, pic: f.picRaw, first: f.value, last: last[i]?.value ?? "" }));
+    return first.map((f, i) => ({ id: f.id, name: f.name, pic: f.picRaw, first: f.value, last: last[i]?.value ?? "" }));
   }, [ready, fields, lines]);
 
   const handleDownload = () => {
-    const blob = new Blob([delimitLines(fields, lines, delimiter).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([delimitLines(fields, lines, delimiter, excluded).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "delimiter-export.csv";
@@ -119,6 +125,7 @@ export function DelimiterExportTab({
   const clearAll = () => {
     setCopybookSource("");
     setDataSource("");
+    setExcluded(new Set());
     toast({ title: "Cleared", description: "Delimiter Export tab data has been reset." });
   };
 
@@ -147,7 +154,10 @@ export function DelimiterExportTab({
                   ? `${fields.filter((f) => !f.isGroup).length} fields, ${recordLength} bytes/record`
                   : "couldn't parse any fields"
               }
-              onLoad={(text) => setCopybookSource(text)}
+              onLoad={(text) => {
+                setCopybookSource(text);
+                setExcluded(new Set());
+              }}
             />
           </CardContent>
         </Card>
@@ -198,7 +208,8 @@ export function DelimiterExportTab({
                   size="sm"
                   onClick={handleDownload}
                   className="h-7 text-xs"
-                  title="Download all records as delimited values, one column per copybook field"
+                  disabled={includedCount === 0}
+                  title="Download all records as delimited values, one column per checked copybook field"
                 >
                   <Download className="w-3 h-3 mr-1.5" />
                   Download CSV ({lines.length})
@@ -208,8 +219,13 @@ export function DelimiterExportTab({
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-500" />
               Input: {lines.length} record{lines.length === 1 ? "" : "s"} → CSV: {lines.length + 1} rows
-              ({lines.length} data + 1 header)
+              ({lines.length} data + 1 header), {includedCount} of {dataFieldCount} fields
             </p>
+            {includedCount === 0 && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-500">
+                All fields are unchecked — check at least one field below to export.
+              </p>
+            )}
             {collisionCount > 0 ? (
               <p className="text-[11px] text-amber-600 dark:text-amber-500">
                 "{delimiter}" already exists in the data ({collisionCount} record
@@ -225,10 +241,22 @@ export function DelimiterExportTab({
               {preview.join("\n")}
             </pre>
             <h3 className="text-sm font-semibold">Per-variable crosscheck</h3>
+            <p className="text-xs text-muted-foreground">
+              Uncheck a field to leave its column out of the CSV.
+            </p>
             <div className="rounded-md border overflow-hidden">
               <Table>
                 <TableHeader className="bg-muted/50">
                   <TableRow>
+                    <TableHead className="w-10 text-xs">
+                      <Checkbox
+                        checked={excluded.size === 0}
+                        title="Check/uncheck all fields"
+                        onCheckedChange={(checked) =>
+                          setExcluded(checked ? new Set() : new Set(crosscheck.map((r) => r.id)))
+                        }
+                      />
+                    </TableHead>
                     <TableHead className="text-xs">Field</TableHead>
                     <TableHead className="text-xs">Type</TableHead>
                     <TableHead className="text-xs">Record 1</TableHead>
@@ -237,7 +265,21 @@ export function DelimiterExportTab({
                 </TableHeader>
                 <TableBody>
                   {crosscheck.map((r, i) => (
-                    <TableRow key={i}>
+                    <TableRow key={i} className={excluded.has(r.id) ? "opacity-50" : ""}>
+                      <TableCell className="py-1.5">
+                        <Checkbox
+                          checked={!excluded.has(r.id)}
+                          title={excluded.has(r.id) ? "Include this field in the CSV" : "Exclude this field from the CSV"}
+                          onCheckedChange={(checked) =>
+                            setExcluded((prev) => {
+                              const next = new Set(prev);
+                              if (checked) next.delete(r.id);
+                              else next.add(r.id);
+                              return next;
+                            })
+                          }
+                        />
+                      </TableCell>
                       <TableCell className="py-1.5 text-xs font-mono">{r.name}</TableCell>
                       <TableCell className="py-1.5 text-xs font-mono text-muted-foreground">{r.pic}</TableCell>
                       <TableCell className="py-1.5 text-xs font-mono">{r.first}</TableCell>

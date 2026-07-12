@@ -347,3 +347,17 @@ AFTER: tambah (1) baris hitungan "Input: N records → CSV: N+1 rows (N data + 1
 File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
 BEFORE: tabel crosscheck di atas indikator delimiter & preview CSV.
 AFTER: urutan jadi — hitungan baris, indikator delimiter, preview CSV, lalu tabel "Per-variable crosscheck" (diberi judul) di bawah.
+
+=== 2026-07-13 (pilih field yang diekspor ke CSV) ===
+File: artifacts/cobol-stream-tool/src/lib/delimit.ts
+BEFORE: delimitLines(fields, lines, delim) — semua field data selalu jadi kolom CSV.
+AFTER: delimitLines(fields, lines, delim, excluded?) — parameter opsional Set berisi id field yang di-exclude; field tersebut dilewati di header maupun baris data.
+
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+BEFORE: tabel crosscheck hanya menampilkan Field/Type/Record 1/Record terakhir; download CSV selalu semua kolom.
+AFTER: tambah kolom checkbox di tabel crosscheck — uncheck field = kolomnya tidak ikut di preview & CSV yang di-download (misal 5 field, uncheck no. 2 & 5 → CSV berisi field 1,3,4). Checkbox di header = check/uncheck semua. Baris yang di-exclude tampil redup (opacity-50). Baris hitungan tambah "X of Y fields". Semua unchecked → tombol Download disabled + peringatan amber. Pilihan direset saat upload copybook baru / Clear Tab.
+
+File: artifacts/cobol-stream-tool/src/lib/delimit.test.ts
+BEFORE: belum ada test exclude.
+AFTER: tambah assert — exclude NAME → header "CITY", row "PARIS".
+Log: node src/lib/delimit.test.ts lulus semua assert; npx tsc --noEmit bersih.

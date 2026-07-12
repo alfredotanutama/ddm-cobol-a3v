@@ -9,13 +9,18 @@ export const escapeValue = (s: string, delim: string) =>
 export const isDataField = (f: ParsedField) =>
   !f.isGroup && f.length > 0 && (!f.isFiller || f.initialValue !== null);
 
-/** Header + one delimited row per input line. */
-export function delimitLines(fields: ParsedField[], lines: string[], delim: string): string[] {
-  const cols = fields.filter(isDataField);
-  const header = cols.map((f) => escapeValue(f.name, delim)).join(delim);
+/** Header + one delimited row per input line. Fields whose id is in `excluded` are left out. */
+export function delimitLines(
+  fields: ParsedField[],
+  lines: string[],
+  delim: string,
+  excluded?: Set<string>,
+): string[] {
+  const included = (f: ParsedField) => isDataField(f) && !excluded?.has(f.id);
+  const header = fields.filter(included).map((f) => escapeValue(f.name, delim)).join(delim);
   const rows = lines.map((line) =>
     decomposeStream(fields, line)
-      .filter(isDataField)
+      .filter(included)
       .map((d) => escapeValue(d.value, delim))
       .join(delim),
   );

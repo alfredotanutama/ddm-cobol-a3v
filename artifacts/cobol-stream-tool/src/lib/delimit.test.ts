@@ -26,4 +26,10 @@ assert.strictEqual(delimitLines(fields, ["A|B       PARIS"], "|")[1], '"A|B"|PAR
 // Quotes in data are doubled per CSV rules.
 assert.strictEqual(escapeValue('say "hi"', ","), '"say ""hi"""');
 
+// Excluding a field drops its column from both header and rows.
+const nameId = fields.find((f) => f.name === "NAME")!.id;
+const [exHeader, exRow] = delimitLines(fields, [line], ",", new Set([nameId]));
+assert.strictEqual(exHeader, "CITY");
+assert.strictEqual(exRow, "PARIS");
+
 console.log("delimit.test.ts: all assertions passed");
