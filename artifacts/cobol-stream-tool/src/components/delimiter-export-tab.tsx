@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { parseCopybook, getRecordLength } from "@/lib/cobol";
-import { delimitLines } from "@/lib/delimit";
+import { parseCopybook, getRecordLength, decomposeStream } from "@/lib/cobol";
+import { delimitLines, isDataField } from "@/lib/delimit";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -95,6 +96,15 @@ export function DelimiterExportTab({
     () => (ready ? lines.filter((l) => l.includes(delimiter)).length : 0),
     [ready, lines, delimiter],
   );
+
+  // Per-field values of the first and last record, for crosschecking the split.
+  const crosscheck = useMemo(() => {
+    if (!ready) return [];
+    const first = decomposeStream(fields, lines[0]).filter(isDataField);
+    const last =
+      lines.length > 1 ? decomposeStream(fields, lines[lines.length - 1]).filter(isDataField) : first;
+    return first.map((f, i) => ({ name: f.name, pic: f.picRaw, first: f.value, last: last[i]?.value ?? "" }));
+  }, [ready, fields, lines]);
 
   const handleDownload = () => {
     const blob = new Blob([delimitLines(fields, lines, delimiter).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
@@ -195,6 +205,11 @@ export function DelimiterExportTab({
                 </Button>
               </div>
             </div>
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-500" />
+              Input: {lines.length} record{lines.length === 1 ? "" : "s"} → CSV: {lines.length + 1} rows
+              ({lines.length} data + 1 header)
+            </p>
             {collisionCount > 0 ? (
               <p className="text-[11px] text-amber-600 dark:text-amber-500">
                 "{delimiter}" already exists in the data ({collisionCount} record
@@ -209,6 +224,29 @@ export function DelimiterExportTab({
             <pre className="rounded-md border bg-muted/40 p-3 text-xs font-mono overflow-x-auto">
               {preview.join("\n")}
             </pre>
+            <h3 className="text-sm font-semibold">Per-variable crosscheck</h3>
+            <div className="rounded-md border overflow-hidden">
+              <Table>
+                <TableHeader className="bg-muted/50">
+                  <TableRow>
+                    <TableHead className="text-xs">Field</TableHead>
+                    <TableHead className="text-xs">Type</TableHead>
+                    <TableHead className="text-xs">Record 1</TableHead>
+                    <TableHead className="text-xs">Record {lines.length} (last)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {crosscheck.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="py-1.5 text-xs font-mono">{r.name}</TableCell>
+                      <TableCell className="py-1.5 text-xs font-mono text-muted-foreground">{r.pic}</TableCell>
+                      <TableCell className="py-1.5 text-xs font-mono">{r.first}</TableCell>
+                      <TableCell className="py-1.5 text-xs font-mono">{r.last}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}

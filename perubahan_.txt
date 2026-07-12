@@ -337,3 +337,13 @@ AFTER: diganti komponen FileUpload ringkas — tombol "Upload file" + status cen
 File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
 BEFORE: peringatan collision hanya muncul bila delimiter ditemukan di data.
 AFTER: indikator selalu tampil saat mengetik delimiter — amber '"x" already exists in the data (N records)' atau hijau '"x" doesn't appear anywhere in the data — safe delimiter'.
+
+=== 2026-07-13 (crosscheck record pertama/terakhir + hitungan baris) ===
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+BEFORE: hanya preview CSV 5 baris pertama.
+AFTER: tambah (1) baris hitungan "Input: N records → CSV: N+1 rows (N data + 1 header)" dengan centang hijau; (2) tabel crosscheck per variabel copybook — kolom Field, Type, Record 1, Record N (terakhir) — untuk memastikan pemisahan data sesuai harapan. Preview CSV tetap ada.
+
+=== 2026-07-13 (urutan section Delimiter Export) ===
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+BEFORE: tabel crosscheck di atas indikator delimiter & preview CSV.
+AFTER: urutan jadi — hitungan baris, indikator delimiter, preview CSV, lalu tabel "Per-variable crosscheck" (diberi judul) di bawah.
