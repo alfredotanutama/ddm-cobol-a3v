@@ -1,0 +1,72 @@
+// S9 with decimal using V9(m)
+/PIC\s+S9\((\d+)\)V9\((\d+)\)/
+→ type: 'SIGNED_DEC', intDigits: n, decDigits: m, length: n+m
+
+// S9 with decimal using literal 9s (e.g. V99)
+/PIC\s+S9\((\d+)\)V(9+)/
+→ type: 'SIGNED_DEC', intDigits: n, decDigits: count of 9s, length: n+count
+
+=== EDGE CASES TO HANDLE ===
+
+1. "{" as last char → digit 0, positive → VERY COMMON in real data
+   "00000000000000{" → +0.00
+   DO NOT treat "{" as unknown/error
+
+2. "}" as last char → digit 0, negative
+   "00000000000000}" → -0.00
+
+3. If last char is regular digit (0-9) on a S9 field:
+   → Treat as positive (some legacy systems skip overpunch for zero)
+   → Show subtle warning: "⚠️ Non-standard encoding, assumed positive"
+
+4. Stream too short for field length:
+   → Show error: "⚠️ Stream too short for field [FIELD-NAME]"
+
+5. FILLER field (PIC X) with leading space:
+   → If total parsed length ≠ stream length, show warning:
+   "⚠️ Stream length mismatch. Expected [X] chars, got [Y]. 
+      Check for hidden leading spaces."
+
+6. Trailing spaces on PIC X fields:
+   → DECOMPOSER: trim trailing spaces for display
+   → GENERATOR: pad with trailing spaces to fill field length
+   → Raw stream always maintains exact field length
+
+=== REAL DATA EXAMPLE TO VERIFY ===
+Use this to test your implementation:
+
+Copybook field: DICH-AMT1  PIC S9(13)V99
+Stream segment: "00000000100010{"
+Expected output: 10001.00
+
+Copybook field: DICH-BAL   PIC S9(13)V99  
+Stream segment: "00000000000000{"
+Expected output: 0.00
+
+Copybook field: DICH-BASE-RATE  PIC S9(5)V99
+Stream segment: "000000{"
+Expected output: 0.00
+
+If -10001.00:
+Stream segment: "00000000100010}"
+Expected output: -10001.00
+
+=== DISPLAY IN TABLE ===
+Decomposer table should show:
+
+Field Name      | PIC Type      | Length | Raw Segment       | Value
+DICH-BAL        | S9(13)V99     | 15     | 00000000000000{   | 0.00
+DICH-AMT1       | S9(13)V99     | 15     | 00000000100010{   | 10,001.00
+DICH-BASE-RATE  | S9(5)V99      | 7      | 000000{           | 0.00
+
+For Generator input:
+- Show input field accepting: positive or negative decimal
+- Placeholder: "e.g. 10001.00 or -10001.00"
+- Validate: only numbers, optional leading minus, optional decimal point
+
+=== DO NOT CHANGE ===
+- Existing PIC X handling
+- Existing PIC 9 (unsigned) handling  
+- Existing REDEFINES display logic
+- Existing file upload / paste logic
+- Overall UI layout and styling

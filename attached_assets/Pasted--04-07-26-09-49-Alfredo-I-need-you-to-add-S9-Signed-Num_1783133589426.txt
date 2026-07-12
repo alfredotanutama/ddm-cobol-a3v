@@ -1,0 +1,187 @@
+[04/07/26 09.49] Alfredo: I need you to add S9 (Signed Numeric) field handling to the existing 
+COBOL stream parser. The app already handles PIC X and PIC 9 fields. 
+Now add support for PIC S9(n) and PIC S9(n)V99 using OVERPUNCH encoding.
+
+=== WHAT IS OVERPUNCH ===
+COBOL stores the +/- sign by encoding it INTO the last digit of the field.
+The last character becomes a special character representing both digit + sign.
+
+Overpunch table:
+  Digit | Positive | Negative
+    0   |    {     |    }
+    1   |    A     |    J
+    2   |    B     |    K
+    3   |    C     |    L
+    4   |    D     |    M
+    5   |    E     |    N
+    6   |    F     |    O
+    7   |    G     |    P
+    8   |    H     |    Q
+    9   |    I     |    R
+
+=== FIELD LENGTH RULES ===
+PIC S9(n)      → total length = n chars
+PIC S9(n)V99   → total length = n + 2 chars
+PIC S9(n)V9(m) → total length = n + m chars
+
+Example:
+  PIC S9(13)V99 → 13 + 2 = 15 chars (NOT 16, NOT 14)
+
+=== OVERPUNCH POSITION ===
+Overpunch is ALWAYS on the LAST character of the ENTIRE field.
+NOT on the last digit of the integer part.
+
+Example PIC S9(13)V99 = 15 chars:
+  Value +10001.00 → "00000000100010{"
+                                    ^ last char of all 15 chars
+  Value -10001.00 → "00000000100010}"
+  Value +0.00     → "00000000000000{"
+  Value -0.00     → "00000000000000}"
+
+=== DECODE LOGIC (Decomposer) ===
+Given raw string for a S9 field:
+
+function decodeSignedNumeric(raw, intDigits, decDigits = 0) {
+  const OVERPUNCH_DECODE = {
+    '{': { digit: '0', sign: '+' }, '}': { digit: '0', sign: '-' },
+    'A': { digit: '1', sign: '+' }, 'J': { digit: '1', sign: '-' },
+    'B': { digit: '2', sign: '+' }, 'K': { digit: '2', sign: '-' },
+    'C': { digit: '3', sign: '+' }, 'L': { digit: '3', sign: '-' },
+    'D': { digit: '4', sign: '+' }, 'M': { digit: '4', sign: '-' },
+    'E': { digit: '5', sign: '+' }, 'N': { digit: '5', sign: '-' },
+    'F': { digit: '6', sign: '+' }, 'O': { digit: '6', sign: '-' },
+    'G': { digit: '7', sign: '+' }, 'P': { digit: '7', sign: '-' },
+    'H': { digit: '8', sign: '+' }, 'Q': { digit: '8', sign: '-' },
+    'I': { digit: '9', sign: '+' }, 'R': { digit: '9', sign: '-' },
+  };
+
+  const lastChar = raw[raw.length - 1].toUpperCase();
+  const decoded = OVERPUNCH_DECODE[lastChar];
+
+  if (!decoded) {
+    // Last char is a regular digit → treat as positive, no overpunch
+    // Show warning in UI
+    const digits = raw;
+    return formatDisplay(digits, intDigits, decDigits, '+');
+  }
+
+  const digits = raw.slice(0, -1) + decoded.digit;
+  return formatDisplay(digits, intDigits, decDigits, decoded.sign);
+}
+
+function formatDisplay(digits, intDigits, decDigits, sign) {
+  const intPart = digits.slice(0, intDigits).replace(/^0+/, '') || '0';
+  if (decDigits === 0) {
+    return (sign === '-' ? '-' : '') + intPart;
+  }
+  const decPart = digits.slice(intDigits);
+  return (sign === '-' ? '-' : '') + intPart + '.' + decPart;
+}
+
+=== ENCODE LOGIC (Generator) ===
+Given user input value, encode to stream:
+
+function encodeSignedNumeric(value, intDigits, decDigits = 0) {
+  const OVERPUNCH_POS = {
+    '0':'{','1':'A','2':'B','3':'C','4':'D',
+    '5':'E','6':'F','7':'G','8':'H','9':'I'
+  };
+  const OVERPUNCH_NEG = {
+    '0':'}','1':'J','2':'K','3':'L','4':'M',
+    '5':'N','6':'O','7':'P','8':'Q','9':'R'
+  };
+
+  const isNegative = value.toString().startsWith('-');
+  const absValue = value.toString().replace(/^-/, '');
+  const [intPart, decPart = ''] = absValue.split('.');
+
+  const paddedInt = intPart.padStart(intDigits, '0').slice(-intDigits);
+  const paddedDec = decPart.padEnd(decDigits, '0').slice(0, decDigits);
+  const combined = paddedInt + paddedDec;
+
+  const lastDigit = combined[combined.length - 1];
+  const overpunch = isNegative
+    ? OVERPUNCH_NEG[lastDigit]
+    : OVERPUNCH_POS[lastDigit];
+
+  return combined.slice(0, -1) + overpunch;
+}
+
+=== COPYBOOK PARSING — NEW REGEX ===
+Add these patterns to the existing copybook parser:
+
+// S9 without decimal
+/PIC\s+S9\((\d+)\)/
+→ type: 'SIGNED', intDigits: n, decDigits: 0, length: n
+[04/07/26 09.49] Alfredo: // S9 with decimal using V9(m)
+/PIC\s+S9\((\d+)\)V9\((\d+)\)/
+→ type: 'SIGNED_DEC', intDigits: n, decDigits: m, length: n+m
+
+// S9 with decimal using literal 9s (e.g. V99)
+/PIC\s+S9\((\d+)\)V(9+)/
+→ type: 'SIGNED_DEC', intDigits: n, decDigits: count of 9s, length: n+count
+
+=== EDGE CASES TO HANDLE ===
+
+1. "{" as last char → digit 0, positive → VERY COMMON in real data
+   "00000000000000{" → +0.00
+   DO NOT treat "{" as unknown/error
+
+2. "}" as last char → digit 0, negative
+   "00000000000000}" → -0.00
+
+3. If last char is regular digit (0-9) on a S9 field:
+   → Treat as positive (some legacy systems skip overpunch for zero)
+   → Show subtle warning: "⚠️ Non-standard encoding, assumed positive"
+
+4. Stream too short for field length:
+   → Show error: "⚠️ Stream too short for field [FIELD-NAME]"
+
+5. FILLER field (PIC X) with leading space:
+   → If total parsed length ≠ stream length, show warning:
+   "⚠️ Stream length mismatch. Expected [X] chars, got [Y]. 
+      Check for hidden leading spaces."
+
+6. Trailing spaces on PIC X fields:
+   → DECOMPOSER: trim trailing spaces for display
+   → GENERATOR: pad with trailing spaces to fill field length
+   → Raw stream always maintains exact field length
+
+=== REAL DATA EXAMPLE TO VERIFY ===
+Use this to test your implementation:
+
+Copybook field: DICH-AMT1  PIC S9(13)V99
+Stream segment: "00000000100010{"
+Expected output: 10001.00
+
+Copybook field: DICH-BAL   PIC S9(13)V99  
+Stream segment: "00000000000000{"
+Expected output: 0.00
+
+Copybook field: DICH-BASE-RATE  PIC S9(5)V99
+Stream segment: "000000{"
+Expected output: 0.00
+
+If -10001.00:
+Stream segment: "00000000100010}"
+Expected output: -10001.00
+
+=== DISPLAY IN TABLE ===
+Decomposer table should show:
+
+Field Name      | PIC Type      | Length | Raw Segment       | Value
+DICH-BAL        | S9(13)V99     | 15     | 00000000000000{   | 0.00
+DICH-AMT1       | S9(13)V99     | 15     | 00000000100010{   | 10,001.00
+DICH-BASE-RATE  | S9(5)V99      | 7      | 000000{           | 0.00
+
+For Generator input:
+- Show input field accepting: positive or negative decimal
+- Placeholder: "e.g. 10001.00 or -10001.00"
+- Validate: only numbers, optional leading minus, optional decimal point
+
+=== DO NOT CHANGE ===
+- Existing PIC X handling
+- Existing PIC 9 (unsigned) handling  
+- Existing REDEFINES display logic
+- Existing file upload / paste logic
+- Overall UI layout and styling

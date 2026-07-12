@@ -1,0 +1,145 @@
+import { useMemo, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
+import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GenerateTab } from "@/components/generate-tab";
+import { DecomposeTab } from "@/components/decompose-tab";
+import { parseCopybook } from "@/lib/cobol";
+import { useToast } from "@/hooks/use-toast";
+import {
+  ADMIN_USER,
+  LoginScreen,
+  UserManagerDialog,
+  getSessionUser,
+  logout,
+} from "@/components/auth";
+
+const queryClient = new QueryClient();
+
+function App() {
+  const [user, setUser] = useState<string | null>(getSessionUser);
+  const [activeTab, setActiveTab] = useState("generate");
+  const [generateCopybook, setGenerateCopybook] = useState("");
+  const [generateValues, setGenerateValues] = useState<Record<string, string>>({});
+  const [decomposeCopybook, setDecomposeCopybook] = useState("");
+  const [decomposeStream, setDecomposeStream] = useState("");
+  const { toast } = useToast();
+
+  const generateFields = useMemo(() => {
+    try {
+      return parseCopybook(generateCopybook);
+    } catch (e) {
+      return [];
+    }
+  }, [generateCopybook]);
+
+  const handleSendToGenerate = (fieldName: string, value: string) => {
+    const match = generateFields.find((f) => f.name === fieldName && !f.isGroup);
+    if (!match) {
+      toast({
+        title: "No matching field",
+        description: `"${fieldName}" wasn't found in the Generate tab's copybook.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setGenerateValues((prev) => ({ ...prev, [match.id]: value }));
+    setActiveTab("generate");
+    toast({ title: "Sent to Generate", description: `${fieldName} value copied over.` });
+  };
+
+  const handleContinueInGenerate = (copybookText: string, valuesByName: Record<string, string>) => {
+    setGenerateCopybook(copybookText);
+    let freshFields = generateFields;
+    try {
+      freshFields = parseCopybook(copybookText);
+    } catch (e) {
+      freshFields = [];
+    }
+    const newValues: Record<string, string> = {};
+    for (const f of freshFields) {
+      if (f.isGroup) continue;
+      if (Object.prototype.hasOwnProperty.call(valuesByName, f.name)) {
+        newValues[f.id] = valuesByName[f.name];
+      }
+    }
+    setGenerateValues(newValues);
+    setActiveTab("generate");
+    toast({ title: "Continuing in Generate", description: "The copybook and field values were carried over." });
+  };
+
+  if (!user) {
+    return (
+      <ThemeProvider defaultTheme="light">
+        <LoginScreen onLogin={setUser} />
+      </ThemeProvider>
+    );
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <TooltipProvider>
+          <div className="min-h-[100dvh] w-full flex flex-col bg-background text-foreground font-sans">
+            <header className="border-b bg-card">
+              <div className="container mx-auto px-4 h-14 flex items-center justify-between max-w-6xl">
+                <div className="flex items-center gap-3">
+                  <img src="/favicon.svg" alt="DDM Stream for COBOLers" className="w-7 h-7" />
+                  <h1 className="font-semibold tracking-tight text-sm">DDM Stream for COBOLers</h1>
+                </div>
+                <div className="flex items-center gap-2">
+                  {user === ADMIN_USER && <UserManagerDialog />}
+                  <span className="text-sm text-muted-foreground">{user}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      logout();
+                      setUser(null);
+                    }}
+                  >
+                    Logout
+                  </Button>
+                  <ThemeToggle />
+                </div>
+              </div>
+            </header>
+            <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="grid w-full grid-cols-2 max-w-[400px] mb-8">
+                  <TabsTrigger value="generate">Generate</TabsTrigger>
+                  <TabsTrigger value="decompose">Decompose</TabsTrigger>
+                </TabsList>
+                <TabsContent value="generate" className="focus-visible:outline-none">
+                  <GenerateTab
+                    copybookSource={generateCopybook}
+                    setCopybookSource={setGenerateCopybook}
+                    values={generateValues}
+                    setValues={setGenerateValues}
+                  />
+                </TabsContent>
+                <TabsContent value="decompose" className="focus-visible:outline-none">
+                  <DecomposeTab
+                    copybookSource={decomposeCopybook}
+                    setCopybookSource={setDecomposeCopybook}
+                    streamSource={decomposeStream}
+                    setStreamSource={setDecomposeStream}
+                    onSendToGenerate={handleSendToGenerate}
+                    onContinueInGenerate={handleContinueInGenerate}
+                  />
+                </TabsContent>
+              </Tabs>
+            </main>
+          </div>
+          <Toaster />
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+}
+
+export default App;

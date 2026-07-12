@@ -1,0 +1,148 @@
+Product Requirement Design
+DOCUMENT ID: ALD-TRY1
+ 
+ 
+ 
+ 
+Version 1
+July, 2026
+ 
+PT Bank Central Asia, Tbk.
+
+PRD:
+DDM STREAMER
+ 
+1 OVERVIEW
+Product Name: COBOL Stream Tool
+Problem Statement: COBOL developers saat ini harus membuka COBOL editor, mengedit field via copybook, export ke .txt, baru bisa hit/test stream. Proses ini repetitive dan time-consuming.
+Goal: Web app yang membantu COBOL developer untuk:
+-          Generate stream dari copybook
+-          Decompose/view stream berdasarkan copybook
+Tech Stack:
+-          Next.js + Tailwind CSS
+-          Pure frontend, no backend, no database, no login
+ 
+2 USER FLOW
+Fitur 1 - Stream Generator:
+User buka tab "Generator"
+User upload atau paste copybook (.txt)
+App parse copybook → tampilkan list field + input box per field
+User isi value tiap field
+App generate stream real-time
+User copy atau download stream sebagai .txt
+Fitur 2 - Stream Decomposer:
+User buka tab "Decomposer"
+User upload atau paste copybook (.txt)
+User upload atau paste stream
+App decompose stream → tampilkan field + value 1:1
+User bisa lihat hasil decomposition
+ 
+
+ 
+3 FEATURES DETAIL
+Tab 1: GENERATE
+Upload copybook via file upload (.txt) atau paste text area.
+Parse copybook dan tampilkan field table:
+o   Field name
+o   PIC type
+o   Length
+o   Input box untuk isi value
+Generate stream otomatis/real-time saat user mengetik
+Output stream ditampilkan di text area
+Tombol Copy to Clipboard
+Tombol Download as .txt
+ 
+Tab 2: DECOMPOSE
+Upload copybook via file upload (.txt) atau paste text area.
+Upload stream via file upload (.txt) atau paste text area
+Tampilkan hasil decomposition dalam bentuk table:
+o   Field name
+o   PIC type
+o   Length
+o   Value (hasil pecahan dari stream)
+REDEFINES ditampilkan sebagai sub-group dengan indentasi
+Tombol Copy result (copy table as text)
+ 
+4 COPYBOOK PARSING RULES
+1.     PIC Types & Length Calculation:
+PIC Type
+Contoh
+Length
+PIC X(n)
+PIC X(04)
+n
+PIC X
+PIC X.
+1
+PIC XXX
+PIC XXX
+count of X
+PIC 9(n)
+PIC 9(03)
+n
+PIC 9(n)V99
+PIC 9(13)V99
+n+2
+PIC 9(n) COMP-3
+PIC 9(07) COMP-3
+display as normal number
+ 
+ 
+ 
+2.      Special Rules
+Rule
+Behavior
+88 VALUE lines
+Skip, tidak affect stream
+Line prefix (ex: A23101, 24174)
+Strip/ignore
+Comment line (ex: A24174*)
+Skip entire line
+FILLER REDEFINES xxx
+Share offset dengan parent field, tidak tambah length
+FILLER biasa
+Tetap dihitung length-nya
+REDEFINES group
+Ditampilkan sebagai sub-group dengan indentasi
+ 
+3.      Display Rules:
+Type
+Display
+Numeric 9(n)
+Leading zeros di-trim
+Alphanumeric X(n)
+Trailing spaces di-trim
+9(n)V99
+Tampilkan sebagai decimal (ex: 123.45)
+ 
+5. UI/UX
+Layout:
+Clean, minimal, professional
+Dark atau light mode (default light)
+2 tabs di bagian atas: "GENERATE" dan "DECOMPOSE”
+ 
+FLOW TAB GENERATE
+[Upload Copybook] atau [Paste Copybook textarea]
+↓
+[Table: Field Name | PIC Type | Length | Input Value]
+↓
+[Generated Stream Output textarea]
+[Copy to Clipboard] [Download .txt]
+ 
+FLOW TAB DECOMPOSE
+[Upload Copybook] atau [Paste Copybook textarea]
+[Upload Stream] atau [Paste Stream textarea]
+↓
+[Table: Field Name | PIC Type | Length | Value]
+  ↳ REDEFINES ditampilkan sebagai sub-row dengan indentasi
+[Copy Result]
+ 
+ 
+6 OUT OF SCOPE
+Login/authentication
+Save history
+Multiple copybook management
+COMP-3 actual packed decimal conversion (display as normal number only)
+COMP, COMP-1, COMP-2 types
+Nested REDEFINES lebih dari 1 level
+Edit hasil decomposition
