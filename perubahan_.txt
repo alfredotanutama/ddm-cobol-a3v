@@ -292,3 +292,48 @@ File: COBOLpic.png -> artifacts/cobol-stream-tool/public/cobol.png (disalin)
 File: artifacts/cobol-stream-tool/src/components/auth.tsx
 BEFORE: login = card di tengah layar polos.
 AFTER: split-screen — kiri gambar CRT COBOL (object-cover, tampil di layar lg ke atas), kanan form login (card tanpa border/shadow). Mobile: gambar disembunyikan, form tetap di tengah.
+
+=== 2026-07-12 (fitur Delimiter Export) ===
+File: artifacts/cobol-stream-tool/src/components/decompose-tab.tsx
+BEFORE: Stream Data dianggap 1 record; tidak ada export CSV.
+AFTER: tiap baris non-kosong di Stream Data = 1 record fixed-width. Tabel menampilkan record pertama (ada catatan bila multi-record). Tombol baru "Delimiter Export" — decompose semua baris pakai copybook, download CSV (delimiter koma, header nama field, escaping standar CSV, FILLER murni dilewati). Badge stream jadi "N records × M bytes" bila multi-baris; cek panjang pakai baris pertama.
+
+=== 2026-07-12 (Delimiter Export jadi tab sendiri) ===
+File: artifacts/cobol-stream-tool/src/components/decompose-tab.tsx
+BEFORE: berisi fitur multi-record + tombol Delimiter Export.
+AFTER: dikembalikan ke perilaku asli (1 record, tanpa export).
+
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx (BARU)
+BEFORE: (tidak ada)
+AFTER: tab baru — input copybook + record lines (paste/upload, 1 baris = 1 record), preview CSV 5 baris pertama, tombol Download CSV (koma, header nama field, escaping CSV, FILLER murni dilewati). Semua diproses di browser.
+
+File: artifacts/cobol-stream-tool/src/App.tsx
+BEFORE: 2 tab (Generate, Decompose).
+AFTER: 3 tab — tambah "Delimiter Export" dengan state sendiri (delimCopybook, delimData).
+
+=== 2026-07-12 (custom delimiter) ===
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+BEFORE: delimiter tetap koma.
+AFTER: input "Delimiter" (max 3 karakter, default koma) di samping tombol download; preview & CSV pakai delimiter pilihan; escaping quote menyesuaikan delimiter; input kosong = fallback koma.
+
+=== 2026-07-12 (proteksi delimiter vs simbol di data) ===
+File: artifacts/cobol-stream-tool/src/lib/delimit.ts (BARU)
+BEFORE: logika escape/join di dalam komponen.
+AFTER: helper murni escapeValue/isDataField/delimitLines — nilai yang mengandung delimiter, kutip, atau newline dibungkus kutip ganda (RFC 4180, kutip di-escape jadi ""), kolom tidak pernah bergeser.
+
+File: artifacts/cobol-stream-tool/src/lib/delimit.test.ts (BARU)
+AFTER: node src/lib/delimit.test.ts — assert koma/semicolon/pipe/kutip. Lulus.
+
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+BEFORE: escape lokal, tanpa peringatan.
+AFTER: pakai lib/delimit; tambah peringatan amber "N records contain <delim> inside their data" agar user sadar nilai dikutip / bisa pilih delimiter lain.
+
+=== 2026-07-12 (Delimiter Export: upload-only, tanpa preview isi) ===
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+BEFORE: copybook & record lines pakai FileTextarea (isi file tampil penuh, bisa diketik).
+AFTER: diganti komponen FileUpload ringkas — tombol "Upload file" + status centang hijau "namafile uploaded — N fields/records...". Isi file tidak ditampilkan. Preview CSV 5 baris & warning mismatch/collision tetap ada.
+
+=== 2026-07-12 (indikator delimiter ada/tidak di data) ===
+File: artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+BEFORE: peringatan collision hanya muncul bila delimiter ditemukan di data.
+AFTER: indikator selalu tampil saat mengetik delimiter — amber '"x" already exists in the data (N records)' atau hijau '"x" doesn't appear anywhere in the data — safe delimiter'.

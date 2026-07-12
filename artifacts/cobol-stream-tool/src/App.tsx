@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GenerateTab } from "@/components/generate-tab";
 import { DecomposeTab } from "@/components/decompose-tab";
+import { DelimiterExportTab } from "@/components/delimiter-export-tab";
 import { parseCopybook } from "@/lib/cobol";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -27,6 +28,8 @@ function App() {
   const [generateValues, setGenerateValues] = useState<Record<string, string>>({});
   const [decomposeCopybook, setDecomposeCopybook] = useState("");
   const [decomposeStream, setDecomposeStream] = useState("");
+  const [delimCopybook, setDelimCopybook] = useState("");
+  const [delimData, setDelimData] = useState("");
   const { toast } = useToast();
 
   const generateFields = useMemo(() => {
@@ -110,9 +113,10 @@ function App() {
             </header>
             <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 max-w-[400px] mb-8">
+                <TabsList className="grid w-full grid-cols-3 max-w-[560px] mb-8">
                   <TabsTrigger value="generate">Generate</TabsTrigger>
                   <TabsTrigger value="decompose">Decompose</TabsTrigger>
+                  <TabsTrigger value="delimiter-export">Delimiter Export</TabsTrigger>
                 </TabsList>
                 <TabsContent value="generate" className="focus-visible:outline-none">
                   <GenerateTab
@@ -130,6 +134,14 @@ function App() {
                     setStreamSource={setDecomposeStream}
                     onSendToGenerate={handleSendToGenerate}
                     onContinueInGenerate={handleContinueInGenerate}
+                  />
+                </TabsContent>
+                <TabsContent value="delimiter-export" className="focus-visible:outline-none">
+                  <DelimiterExportTab
+                    copybookSource={delimCopybook}
+                    setCopybookSource={setDelimCopybook}
+                    dataSource={delimData}
+                    setDataSource={setDelimData}
                   />
                 </TabsContent>
               </Tabs>
