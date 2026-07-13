@@ -5,3 +5,6 @@ dist/
 .env*
 *.tsbuildinfo
 .tsbuildinfo
+COMP3COPYBOOK.txt
+DATA_DAT.dat
+COMP3VIEWDATA.txt
