@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { getSettings, putSetting } from "@/lib/settings-api";
+import { getSettings, saveBroadcast } from "@/lib/settings-api";
 
 export interface Broadcast {
   text: string;
@@ -72,7 +72,7 @@ export function BroadcastDialog() {
   const persist = async (value: Broadcast | null) => {
     setSaving(true);
     try {
-      await putSetting("broadcast", value);
+      await saveBroadcast(value);
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
       setOpen(false);
     } catch (e) {

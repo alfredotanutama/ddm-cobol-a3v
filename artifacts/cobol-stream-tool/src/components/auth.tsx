@@ -13,7 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { BroadcastBanner } from "@/components/broadcast";
-import { getSettings, putSetting, useSettings } from "@/lib/settings-api";
+import { getSettings, login, saveUsers, useSettings } from "@/lib/settings-api";
 
 export const ADMIN_USER = "alfredo";
 // Emergency fallback: lets the admin in when the DB is unreachable. Only used after a failed
@@ -43,12 +43,11 @@ export function LoginScreen({ onLogin }: { onLogin: (user: string) => void }) {
     setChecking(true);
     setError("");
     try {
-      // Fetch fresh so a password just changed on another device is honored immediately.
-      const { admin_pw, users } = await getSettings();
-      const ok = u === ADMIN_USER ? password === admin_pw : users[u] === password;
-      if (ok) {
-        sessionStorage.setItem(SESSION_KEY, u);
-        onLogin(u);
+      // Password is verified on the server; nothing secret comes back to the browser.
+      const authed = await login(u, password);
+      if (authed) {
+        sessionStorage.setItem(SESSION_KEY, authed);
+        onLogin(authed);
       } else {
         setError("Wrong user ID or password");
       }
@@ -128,8 +127,11 @@ export function LoginScreen({ onLogin }: { onLogin: (user: string) => void }) {
 
 export function UserManagerDialog() {
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<{ id: string; pw: string }[]>([]);
-  const [adminPw, setAdminPw] = useState("");
+  // Passwords are hashed server-side and never sent back, so existing users load with a blank
+  // password field. `isNew` marks rows the admin just added (those DO require a password).
+  const [rows, setRows] = useState<{ id: string; pw: string; isNew: boolean }[]>([]);
+  const [adminPw, setAdminPw] = useState(""); // current admin password — required to authorize the save
+  const [newAdminPw, setNewAdminPw] = useState(""); // optional; blank keeps the current admin password
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -137,11 +139,11 @@ export function UserManagerDialog() {
     if (o) {
       setRows([]);
       setAdminPw("");
+      setNewAdminPw("");
       setError("");
       try {
-        const { admin_pw, users } = await getSettings();
-        setRows(Object.entries(users).map(([id, pw]) => ({ id, pw })));
-        setAdminPw(admin_pw ?? "");
+        const { users } = await getSettings();
+        setRows(users.map((id) => ({ id, pw: "", isNew: false })));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't load users");
       }
@@ -153,20 +155,24 @@ export function UserManagerDialog() {
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
   const save = async () => {
-    if (!adminPw) return setError("Admin password can't be empty");
-    const guests: Record<string, string> = {};
-    for (const { id, pw } of rows) {
+    if (!adminPw) return setError("Enter the current admin password to save changes");
+    const seen = new Set<string>();
+    for (const { id, pw, isNew } of rows) {
       const name = id.trim();
-      if (!name || !pw) return setError("User ID and password can't be empty");
+      if (!name) return setError("User ID can't be empty");
       if (name === ADMIN_USER) return setError(`"${ADMIN_USER}" is the admin — pick another ID`);
-      if (name in guests) return setError(`Duplicate user ID "${name}"`);
-      guests[name] = pw;
+      if (seen.has(name)) return setError(`Duplicate user ID "${name}"`);
+      if (isNew && !pw) return setError(`Set a password for new user "${name}"`);
+      seen.add(name);
     }
     setSaving(true);
     setError("");
     try {
-      await putSetting("users", guests);
-      await putSetting("admin_pw", adminPw);
+      await saveUsers(
+        adminPw,
+        rows.map((r) => ({ id: r.id.trim(), password: r.pw })),
+        newAdminPw,
+      );
       setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save");
@@ -188,11 +194,20 @@ export function UserManagerDialog() {
           <DialogTitle>Users</DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
-          <Label htmlFor="admin-pw">Admin password ({ADMIN_USER})</Label>
+          <Label htmlFor="admin-pw">Admin password ({ADMIN_USER}) — confirm to save</Label>
           <Input
             id="admin-pw"
+            type="password"
             value={adminPw}
+            placeholder="Current admin password"
             onChange={(e) => setAdminPw(e.target.value)}
+          />
+          <Input
+            id="new-admin-pw"
+            type="password"
+            value={newAdminPw}
+            placeholder="New admin password (leave blank to keep)"
+            onChange={(e) => setNewAdminPw(e.target.value)}
           />
         </div>
         <div className="space-y-2">
@@ -205,8 +220,9 @@ export function UserManagerDialog() {
                 onChange={(e) => update(i, { id: e.target.value })}
               />
               <Input
+                type="password"
                 value={row.pw}
-                placeholder="Password"
+                placeholder={row.isNew ? "Password" : "Leave blank to keep"}
                 onChange={(e) => update(i, { pw: e.target.value })}
               />
               <Button
@@ -223,7 +239,7 @@ export function UserManagerDialog() {
             variant="outline"
             size="sm"
             className="gap-2"
-            onClick={() => setRows([...rows, { id: "", pw: "" }])}
+            onClick={() => setRows([...rows, { id: "", pw: "", isNew: true }])}
           >
             <Plus className="w-4 h-4" />
             Add user

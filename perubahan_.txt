@@ -1,3 +1,59 @@
+PERUBAHAN — 2026-07-13 (keamanan password)
+==========================================
+
+Fitur: Password sekarang di-HASH (scrypt) dan diverifikasi di server. Password
+tidak pernah dikirim balik ke browser lagi.
+
+Masalah sebelumnya: GET /api/settings mengembalikan admin_pw + semua password user
+(plaintext) ke browser — siapa pun yang buka endpoint bisa baca semua password.
+Sekarang GET hanya mengembalikan broadcast + daftar username (tanpa password).
+
+FILE YANG DIUBAH
+----------------
+
+1. artifacts/cobol-stream-tool/api/settings.ts
+   - Tambah hashPw()/verifyPw() pakai node:crypto scrypt (tanpa dependency baru).
+     Format simpan: "scrypt$<salt_hex>$<hash_hex>". Verifikasi pakai timingSafeEqual.
+   - GET: hanya { broadcast, users:[username...] } — tidak ada password/hash.
+   - POST {action:"login", user, password}: verifikasi di server, balas {ok, user}.
+     Auto-upgrade: kalau nilai tersimpan masih plaintext lama, di-rehash saat login
+     sukses.
+   - POST {action:"save-users", adminPassword, newAdminPassword, users:[{id,password}]}:
+     server verifikasi adminPassword dulu (kalau salah -> 401), lalu hash password
+     baru. Password kosong utk user lama = pertahankan hash yang ada.
+   - PUT hanya untuk broadcast.
+
+2. artifacts/cobol-stream-tool/src/lib/settings-api.ts
+   - AppSettings jadi { broadcast, users:string[] } (username saja).
+   - Tambah login(), saveUsers(), saveBroadcast(). Hapus putSetting lama.
+
+3. artifacts/cobol-stream-tool/src/components/auth.tsx
+   - Login lewat login() (verifikasi server). Fallback admin offline tetap ada.
+   - UserManagerDialog: field password user lama kosong ("Leave blank to keep")
+     karena hash tidak bisa ditampilkan. Ada field "Admin password (confirm to save)"
+     — WAJIB diisi utk otorisasi simpan (karena session cuma simpan username, jadi
+     ini satu-satunya proteksi nyata), plus field "New admin password" opsional.
+     User baru wajib punya password. Semua input password pakai type=password.
+
+4. artifacts/cobol-stream-tool/src/components/broadcast.tsx
+   - putSetting -> saveBroadcast.
+
+MIGRASI DATA
+------------
+- Password lama (admin_pw, ids, stella) yang masih plaintext di DB sudah di-hash
+  sekali jalan. Verifikasi: semua nilai sekarang diawali "scrypt$", tidak ada
+  plaintext tersisa.
+
+CATATAN / LOG
+-------------
+- Dites di localhost (vercel dev) SEBELUM commit/deploy:
+  GET tanpa password OK; login benar/salah/user-tak-dikenal OK; save-users password
+  admin salah -> 401; save-users benar (tambah user tmp -> ke-hash & bisa login,
+  stella tetap bisa login via blank-keep, lalu tmp dihapus utk restore) OK.
+- Sisa ceiling: fallback admin offline (ADMIN_FALLBACK_PASSWORD di auth.tsx) masih
+  plaintext hardcoded di bundle — memang disengaja utk pintu darurat admin.
+
+
 PERUBAHAN — 2026-07-13
 ======================
 
