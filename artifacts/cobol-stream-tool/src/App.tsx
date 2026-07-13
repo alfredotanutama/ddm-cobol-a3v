@@ -11,6 +11,7 @@ import { DecomposeTab } from "@/components/decompose-tab";
 import { DelimiterExportTab } from "@/components/delimiter-export-tab";
 import { parseCopybook } from "@/lib/cobol";
 import { useToast } from "@/hooks/use-toast";
+import { useSettings } from "@/lib/settings-api";
 import {
   ADMIN_USER,
   LoginScreen,
@@ -18,13 +19,14 @@ import {
   getSessionUser,
   logout,
 } from "@/components/auth";
-import { BroadcastBanner, BroadcastDialog, loadBroadcast } from "@/components/broadcast";
+import { BroadcastBanner, BroadcastDialog } from "@/components/broadcast";
 
 const queryClient = new QueryClient();
 
-function App() {
+function AppInner() {
   const [user, setUser] = useState<string | null>(getSessionUser);
-  const [broadcast, setBroadcast] = useState(loadBroadcast);
+  const { data: settings } = useSettings();
+  const broadcast = settings?.broadcast ?? null;
   const [activeTab, setActiveTab] = useState("generate");
   const [generateCopybook, setGenerateCopybook] = useState("");
   const [generateValues, setGenerateValues] = useState<Record<string, string>>({});
@@ -78,18 +80,11 @@ function App() {
   };
 
   if (!user) {
-    return (
-      <ThemeProvider defaultTheme="light">
-        <LoginScreen onLogin={setUser} />
-      </ThemeProvider>
-    );
+    return <LoginScreen onLogin={setUser} />;
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="light">
-        <TooltipProvider>
-          <div className="min-h-[100dvh] w-full flex flex-col bg-background text-foreground font-sans">
+    <div className="min-h-[100dvh] w-full flex flex-col bg-background text-foreground font-sans">
             <header className="border-b bg-card">
               <div className="container mx-auto px-4 h-14 flex items-center justify-between max-w-6xl">
                 <div className="flex items-center gap-3">
@@ -97,7 +92,7 @@ function App() {
                   <h1 className="font-semibold tracking-tight text-sm">DDM Stream for COBOLers</h1>
                 </div>
                 <div className="flex items-center gap-2">
-                  {user === ADMIN_USER && <BroadcastDialog onSaved={setBroadcast} />}
+                  {user === ADMIN_USER && <BroadcastDialog />}
                   {user === ADMIN_USER && <UserManagerDialog />}
                   <span className="text-sm text-muted-foreground">{user}</span>
                   <Button
@@ -154,7 +149,16 @@ function App() {
                 </TabsContent>
               </Tabs>
             </main>
-          </div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <TooltipProvider>
+          <AppInner />
           <Toaster />
         </TooltipProvider>
       </ThemeProvider>

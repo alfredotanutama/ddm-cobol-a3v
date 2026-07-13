@@ -1,0 +1,14 @@
+{
+  "comment": "Standalone config so Vercel's @vercel/node builder emits the serverless function. It must NOT inherit the app's tsconfig (noEmit + allowImportingTsExtensions), which blocks emit.",
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": false,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

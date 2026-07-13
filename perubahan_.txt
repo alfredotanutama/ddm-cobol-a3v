@@ -1,3 +1,74 @@
+PERUBAHAN — 2026-07-13
+======================
+
+Fitur: Admin password, daftar user (id + password), dan broadcast sekarang
+disimpan di database Postgres (Supabase), bukan lagi di localStorage per-browser.
+Data jadi persist lintas sesi dan lintas device — broadcast/user yang dibuat di
+satu device muncul di device lain.
+
+Alur: browser -> /api/settings (Vercel serverless function) -> Postgres.
+Kredensial DB (DATABASE_URL) hanya ada di server, tidak pernah dikirim ke browser.
+
+FILE YANG DIUBAH / DITAMBAH
+---------------------------
+
+1. artifacts/cobol-stream-tool/api/settings.ts (BARU)
+   - Vercel serverless function. GET = ambil semua setting; PUT {key,value} =
+     upsert satu key (value null = hapus, dipakai untuk clear broadcast).
+   - Pakai `pg` (pool max:1, session pooler Supabase). Key valid: admin_pw,
+     users, broadcast.
+
+2. artifacts/cobol-stream-tool/api/tsconfig.json (BARU)
+   - tsconfig khusus folder api/ supaya Vercel bisa emit function-nya (tsconfig
+     app pakai noEmit + allowImportingTsExtensions yang memblok emit).
+
+3. artifacts/cobol-stream-tool/src/lib/settings-api.ts (BARU)
+   - Helper client: getSettings(), putSetting(key, value), dan hook useSettings()
+     (react-query) untuk cache setting bersama.
+
+4. artifacts/cobol-stream-tool/src/components/auth.tsx
+   - Hapus penyimpanan localStorage (admin_pw, users). Login validasi ke server
+     (fetch fresh tiap submit). Session user tetap di sessionStorage.
+   - Fallback: kalau server tidak bisa dihubungi, admin masih bisa login dengan
+     password hardcoded ADMIN_FALLBACK_PASSWORD ("alfredo3gituloh"). Guest tidak
+     bisa login offline.
+   - UserManagerDialog load/save via API (async), tombol Save punya state "Saving…".
+
+5. artifacts/cobol-stream-tool/src/components/broadcast.tsx
+   - Hapus localStorage. BroadcastDialog load/save via API, refresh banner lewat
+     invalidate query ["settings"]. Hapus prop onSaved.
+
+6. artifacts/cobol-stream-tool/src/App.tsx
+   - QueryClientProvider dinaikkan supaya membungkus login juga (LoginScreen
+     pakai useSettings). Banner broadcast dibaca dari useSettings, bukan useState.
+
+7. artifacts/cobol-stream-tool/package.json
+   - Tambah dependency: pg; devDependency: @types/pg, @vercel/node.
+
+8. Run DDM.command
+   - Ganti `pnpm dev` (vite saja) jadi `vercel dev` supaya function /api ikut
+     jalan di lokal (login/users/broadcast bisa dites di localhost).
+
+DATABASE
+--------
+- Tabel `app_settings (key text primary key, value jsonb, updated_at timestamptz)`
+  di Supabase. Seed: admin_pw="alfredo3gituloh", users={"ids":"ids"}.
+- Env Vercel: DATABASE_URL diset di production/preview/development. PORT & BASE_PATH
+  ditambah ke development/preview supaya build & `vercel dev` jalan.
+
+CATATAN / LOG
+-------------
+- Deploy pertama gagal: "api/settings.ts: Emit skipped" — diperbaiki dengan
+  menambah api/tsconfig.json (noEmit:false).
+- Verifikasi: function dites langsung ke Supabase (GET/PUT/clear ok), endpoint live
+  https://ddm-streamers.vercel.app/api/settings balas 200, `vercel dev` lokal
+  serve UI + /api, typecheck bersih.
+- Keamanan: password masih plaintext (login memang gerbang dekoratif), tapi tidak
+  lagi world-readable dan tidak lagi di-hardcode di bundle — KECUALI fallback admin
+  yang sengaja hardcoded. Kalau password admin diganti lewat dialog Users, update
+  juga ADMIN_FALLBACK_PASSWORD di auth.tsx. Upgrade berikutnya: hash (bcrypt).
+
+
 PERUBAHAN — 2026-07-12
 ======================
 

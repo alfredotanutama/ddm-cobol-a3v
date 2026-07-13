@@ -12,30 +12,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { BroadcastBanner, loadBroadcast } from "@/components/broadcast";
+import { BroadcastBanner } from "@/components/broadcast";
+import { getSettings, putSetting, useSettings } from "@/lib/settings-api";
 
 export const ADMIN_USER = "alfredo";
-const ADMIN_PASSWORD = "alfredo3gituloh";
-const ADMIN_PW_KEY = "ddm_admin_pw";
-const USERS_KEY = "ddm_users";
+// Emergency fallback: lets the admin in when the DB is unreachable. Only used after a failed
+// getSettings() — the DB value is the source of truth whenever the server is reachable.
+// ponytail: hardcoded in the bundle by design; keep it in sync if you change the admin password.
+const ADMIN_FALLBACK_PASSWORD = "alfredo3gituloh";
 const SESSION_KEY = "ddm_user";
-
-function adminPassword(): string {
-  return localStorage.getItem(ADMIN_PW_KEY) ?? ADMIN_PASSWORD;
-}
-
-// ponytail: plaintext passwords in localStorage — this is a client-side gate only; move to a real backend if it must be secure
-function loadGuests(): Record<string, string> {
-  try {
-    const stored = JSON.parse(localStorage.getItem(USERS_KEY) ?? "");
-    if (stored && typeof stored === "object" && !Array.isArray(stored)) return stored;
-  } catch {
-    // fall through to seed
-  }
-  const seed = { ids: "ids" };
-  localStorage.setItem(USERS_KEY, JSON.stringify(seed));
-  return seed;
-}
 
 export function getSessionUser(): string | null {
   return sessionStorage.getItem(SESSION_KEY);
@@ -49,16 +34,34 @@ export function LoginScreen({ onLogin }: { onLogin: (user: string) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+  const { data: settings } = useSettings();
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const u = username.trim();
-    const ok = u === ADMIN_USER ? password === adminPassword() : loadGuests()[u] === password;
-    if (ok) {
-      sessionStorage.setItem(SESSION_KEY, u);
-      onLogin(u);
-    } else {
-      setError("Wrong user ID or password");
+    setChecking(true);
+    setError("");
+    try {
+      // Fetch fresh so a password just changed on another device is honored immediately.
+      const { admin_pw, users } = await getSettings();
+      const ok = u === ADMIN_USER ? password === admin_pw : users[u] === password;
+      if (ok) {
+        sessionStorage.setItem(SESSION_KEY, u);
+        onLogin(u);
+      } else {
+        setError("Wrong user ID or password");
+      }
+    } catch {
+      // Server unreachable — allow the admin in with the fallback password.
+      if (u === ADMIN_USER && password === ADMIN_FALLBACK_PASSWORD) {
+        sessionStorage.setItem(SESSION_KEY, u);
+        onLogin(u);
+      } else {
+        setError("Can't reach the server — only the admin can sign in offline");
+      }
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -109,12 +112,12 @@ export function LoginScreen({ onLogin }: { onLogin: (user: string) => void }) {
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full">
-              Login
+            <Button type="submit" className="w-full" disabled={checking}>
+              {checking ? "Signing in…" : "Login"}
             </Button>
           </form>
           <div className="mt-6">
-            <BroadcastBanner broadcast={loadBroadcast()} />
+            <BroadcastBanner broadcast={settings?.broadcast ?? null} />
           </div>
         </CardContent>
       </Card>
@@ -128,12 +131,20 @@ export function UserManagerDialog() {
   const [rows, setRows] = useState<{ id: string; pw: string }[]>([]);
   const [adminPw, setAdminPw] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleOpenChange = (o: boolean) => {
+  const handleOpenChange = async (o: boolean) => {
     if (o) {
-      setRows(Object.entries(loadGuests()).map(([id, pw]) => ({ id, pw })));
-      setAdminPw(adminPassword());
+      setRows([]);
+      setAdminPw("");
       setError("");
+      try {
+        const { admin_pw, users } = await getSettings();
+        setRows(Object.entries(users).map(([id, pw]) => ({ id, pw })));
+        setAdminPw(admin_pw ?? "");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't load users");
+      }
     }
     setOpen(o);
   };
@@ -141,7 +152,7 @@ export function UserManagerDialog() {
   const update = (i: number, patch: Partial<{ id: string; pw: string }>) =>
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
-  const save = () => {
+  const save = async () => {
     if (!adminPw) return setError("Admin password can't be empty");
     const guests: Record<string, string> = {};
     for (const { id, pw } of rows) {
@@ -151,9 +162,17 @@ export function UserManagerDialog() {
       if (name in guests) return setError(`Duplicate user ID "${name}"`);
       guests[name] = pw;
     }
-    localStorage.setItem(USERS_KEY, JSON.stringify(guests));
-    localStorage.setItem(ADMIN_PW_KEY, adminPw);
-    setOpen(false);
+    setSaving(true);
+    setError("");
+    try {
+      await putSetting("users", guests);
+      await putSetting("admin_pw", adminPw);
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -212,7 +231,9 @@ export function UserManagerDialog() {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
-          <Button onClick={save}>Save</Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

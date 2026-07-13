@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,26 +13,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-
-// ponytail: broadcast lives in localStorage — same per-browser ceiling as the user list; move both to a backend if messages must reach other machines
-const BROADCAST_KEY = "ddm_broadcast";
+import { getSettings, putSetting } from "@/lib/settings-api";
 
 export interface Broadcast {
   text: string;
   url: string;
   label: string;
-}
-
-export function loadBroadcast(): Broadcast | null {
-  try {
-    const b = JSON.parse(localStorage.getItem(BROADCAST_KEY) ?? "");
-    if (b && typeof b === "object" && (b.text?.trim() || b.url?.trim())) {
-      return { text: b.text ?? "", url: b.url ?? "", label: b.label ?? "" };
-    }
-  } catch {
-    // no broadcast
-  }
-  return null;
 }
 
 export function BroadcastBanner({ broadcast }: { broadcast: Broadcast | null }) {
@@ -57,39 +44,50 @@ export function BroadcastBanner({ broadcast }: { broadcast: Broadcast | null }) 
   );
 }
 
-export function BroadcastDialog({ onSaved }: { onSaved: (b: Broadcast | null) => void }) {
+export function BroadcastDialog() {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
   const [label, setLabel] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleOpenChange = (o: boolean) => {
+  const handleOpenChange = async (o: boolean) => {
     if (o) {
-      const b = loadBroadcast();
-      setText(b?.text ?? "");
-      setUrl(b?.url ?? "");
-      setLabel(b?.label ?? "");
+      setText("");
+      setUrl("");
+      setLabel("");
+      try {
+        const b = (await getSettings()).broadcast;
+        setText(b?.text ?? "");
+        setUrl(b?.url ?? "");
+        setLabel(b?.label ?? "");
+      } catch {
+        // start blank if load fails
+      }
     }
     setOpen(o);
   };
 
-  const save = () => {
-    const b: Broadcast = { text: text.trim(), url: url.trim(), label: label.trim() };
-    if (!b.text && !b.url) {
-      localStorage.removeItem(BROADCAST_KEY);
-      onSaved(null);
-    } else {
-      localStorage.setItem(BROADCAST_KEY, JSON.stringify(b));
-      onSaved(b);
+  const persist = async (value: Broadcast | null) => {
+    setSaving(true);
+    try {
+      await putSetting("broadcast", value);
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      setOpen(false);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't save broadcast");
+    } finally {
+      setSaving(false);
     }
-    setOpen(false);
   };
 
-  const clear = () => {
-    localStorage.removeItem(BROADCAST_KEY);
-    onSaved(null);
-    setOpen(false);
+  const save = () => {
+    const b: Broadcast = { text: text.trim(), url: url.trim(), label: label.trim() };
+    persist(b.text || b.url ? b : null);
   };
+
+  const clear = () => persist(null);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -134,10 +132,12 @@ export function BroadcastDialog({ onSaved }: { onSaved: (b: Broadcast | null) =>
           </div>
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={clear}>
+          <Button variant="outline" onClick={clear} disabled={saving}>
             Clear broadcast
           </Button>
-          <Button onClick={save}>Save</Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
