@@ -33,7 +33,8 @@ function AppInner() {
   const [decomposeCopybook, setDecomposeCopybook] = useState("");
   const [decomposeStream, setDecomposeStream] = useState("");
   const [delimCopybook, setDelimCopybook] = useState("");
-  const [delimData, setDelimData] = useState("");
+  // Raw bytes: Delimiter Export decodes them as text or binary COMP-3 depending on the copybook.
+  const [delimData, setDelimData] = useState<Uint8Array | null>(null);
   const { toast } = useToast();
 
   const generateFields = useMemo(() => {
@@ -149,6 +150,11 @@ function AppInner() {
                 </TabsContent>
               </Tabs>
             </main>
+            <footer className="border-t">
+              <div className="container mx-auto px-4 py-3 max-w-6xl text-xs text-muted-foreground">
+                DDM Stream for COBOLers v{__APP_VERSION__}
+              </div>
+            </footer>
     </div>
   );
 }

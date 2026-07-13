@@ -1,3 +1,62 @@
+PERUBAHAN — 2026-07-14 (COMP-3 binary + versi di footer) — v1.5.0
+==================================================================
+
+Fitur 1: Delimiter Export sekarang bisa membaca file data BINARY (.dat) berisi
+field COMP-3 (packed decimal) + teks EBCDIC dari mainframe. Kalau copybook
+mengandung COMP-3, mode binary aktif otomatis.
+
+Aturan decode (divalidasi byte-per-byte terhadap DATA_DAT.dat asli — lihat
+parser_cobol_guide.md §10):
+- Panjang byte packed = ceil((jumlah digit + 1) / 2). 9(10) -> 6 byte,
+  S9(13)V99 -> 8 byte. Record contoh = 36 byte.
+- Nibble terakhir = tanda: C/F/A/E = plus, D/B = minus.
+- Field non-COMP-3 di record binary di-decode sebagai EBCDIC (CP037);
+  byte non-printable ditampilkan "." (sama seperti hex view ISPF).
+- Format angka RAW FIXED-WIDTH: lebar digit penuh sesuai PIC, nol di depan
+  dipertahankan, titik desimal di posisi V, "-" utk negatif.
+  Contoh output: 0030001141,12345678,013,0,.,MC,0000000000001.50,0000000000008.97
+- Record yang seluruhnya 0x00 (padding ekor file) dilewati + warning;
+  sisa byte yang tidak genap satu record juga warning.
+
+Fitur 2: Versi aplikasi tampil di footer ("DDM Stream for COBOLers v1.5.0").
+Sumber versi = package.json (semver): fitur baru -> naik minor (1.6.0),
+perbaikan bug -> naik patch (1.5.1). Di-inject saat build via vite define.
+
+FILE YANG DIUBAH / DITAMBAH
+---------------------------
+1. artifacts/cobol-stream-tool/src/lib/comp3.ts (BARU)
+   - Tabel EBCDIC CP037, packedByteLength(), binaryLayout() (offset byte packed,
+     REDEFINES tetap overlay), decodeBinaryField(), decomposeBinaryRecords().
+2. artifacts/cobol-stream-tool/src/lib/comp3.test.ts (BARU)
+   - Self-check pakai byte record asli DATA_DAT.dat + kasus tanda negatif (D/B),
+     nibble digit invalid, skip record nol, leftover bytes.
+     Jalankan: node --experimental-strip-types src/lib/comp3.test.ts
+3. artifacts/cobol-stream-tool/src/lib/delimit.ts
+   - delimitRows(fields, rows, delim, excluded) generik (terima hasil decompose);
+     delimitLines tetap ada sebagai wrapper utk mode teks. Test lama lulus tanpa ubah.
+4. artifacts/cobol-stream-tool/src/components/delimiter-export-tab.tsx
+   - Upload record file dibaca sebagai bytes (ArrayBuffer). Mode binary otomatis
+     kalau copybook ada COMP-3 (ada indikator + catatan EBCDIC). Preview, tabel
+     crosscheck, checkbox exclude, dan download CSV jalan sama di kedua mode.
+   - Warning "delimiter sudah ada di data" sekarang cek nilai hasil decode,
+     bukan byte mentah (memperbaiki false-positive lama).
+5. artifacts/cobol-stream-tool/src/App.tsx
+   - State delimData: string -> Uint8Array | null. Footer versi ditambah.
+6. artifacts/cobol-stream-tool/package.json — version 1.5.0.
+7. artifacts/cobol-stream-tool/vite.config.ts — inject __APP_VERSION__ dari
+   package.json. (+ src/vite-env.d.ts utk deklarasi TypeScript-nya)
+8. parser_cobol_guide.md (BARU) — semua aturan parsing copybook/COBOL dalam 1 file.
+
+CATATAN / LOG
+-------------
+- Dites di localhost dulu: comp3.test.ts + delimit.test.ts lulus, typecheck bersih,
+  file DATA_DAT.dat asli menghasilkan persis 1 record + 2 warning (3 record nol
+  dilewati, 28 byte sisa) dengan nilai sesuai COMP3VIEWDATA.txt.
+- Verifikasi versi: build production menyisipkan "1.5.0" ke bundle. Vite dev di
+  bawah vercel dev perlu restart sekali utk memuat vite.config baru.
+- Belum didukung (disengaja): OCCURS, COMP/COMP-1/COMP-2, codepage selain CP037.
+
+
 PERUBAHAN — 2026-07-13 (keamanan password)
 ==========================================
 

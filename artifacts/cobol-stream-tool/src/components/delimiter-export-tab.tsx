@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { parseCopybook, getRecordLength, decomposeStream } from "@/lib/cobol";
-import { delimitLines, isDataField } from "@/lib/delimit";
+import { parseCopybook, getRecordLength, decomposeStream, type DecomposedField } from "@/lib/cobol";
+import { decomposeBinaryRecords } from "@/lib/comp3";
+import { delimitRows, isDataField } from "@/lib/delimit";
 import { EmptyState } from "./empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -9,18 +10,20 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Trash2, Upload, CheckCircle2 } from "lucide-react";
+import { Download, Trash2, Upload, CheckCircle2, Binary } from "lucide-react";
 
 function FileUpload({
   label,
   loaded,
   loadedNote,
-  onLoad,
+  onLoadText,
+  onLoadBytes,
 }: {
   label: string;
   loaded: boolean;
   loadedNote: string;
-  onLoad: (text: string, fileName: string) => void;
+  onLoadText?: (text: string, fileName: string) => void;
+  onLoadBytes?: (bytes: Uint8Array, fileName: string) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
@@ -30,12 +33,17 @@ function FileUpload({
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      if (typeof ev.target?.result === "string") {
-        onLoad(ev.target.result, file.name);
+      const result = ev.target?.result;
+      if (onLoadBytes && result instanceof ArrayBuffer) {
+        onLoadBytes(new Uint8Array(result), file.name);
+        setFileName(file.name);
+      } else if (onLoadText && typeof result === "string") {
+        onLoadText(result, file.name);
         setFileName(file.name);
       }
     };
-    reader.readAsText(file);
+    if (onLoadBytes) reader.readAsArrayBuffer(file);
+    else reader.readAsText(file);
     e.target.value = "";
   };
 
@@ -65,8 +73,8 @@ export function DelimiterExportTab({
 }: {
   copybookSource: string;
   setCopybookSource: (v: string) => void;
-  dataSource: string;
-  setDataSource: (v: string) => void;
+  dataSource: Uint8Array | null;
+  setDataSource: (v: Uint8Array | null) => void;
 }) {
   const { toast } = useToast();
   const [delimiterInput, setDelimiterInput] = useState(",");
@@ -82,50 +90,76 @@ export function DelimiterExportTab({
     }
   }, [copybookSource]);
 
-  // Each non-empty line is one fixed-width record.
-  const lines = useMemo(() => dataSource.split(/\r?\n/).filter((l) => l.length > 0), [dataSource]);
+  // Any COMP-3 field switches the record file to binary mode (packed decimal + EBCDIC text).
+  const binaryMode = useMemo(() => fields.some((f) => f.isComp3), [fields]);
 
-  const recordLength = useMemo(() => getRecordLength(fields), [fields]);
-  const lengthMismatch = fields.length > 0 && lines.length > 0 && lines[0].length !== recordLength;
-  const ready = fields.length > 0 && lines.length > 0;
+  // Decode all records once; every view (preview, crosscheck, download) reads from `rows`.
+  const decoded = useMemo((): {
+    rows: DecomposedField[][];
+    recordLength: number;
+    warnings: string[];
+    lengthMismatch: boolean;
+  } => {
+    if (fields.length === 0 || !dataSource || dataSource.length === 0) {
+      return { rows: [], recordLength: 0, warnings: [], lengthMismatch: false };
+    }
+    if (binaryMode) {
+      const { records, warnings, recordLength } = decomposeBinaryRecords(fields, dataSource);
+      return { rows: records, recordLength, warnings, lengthMismatch: false };
+    }
+    // Text mode: each non-empty line is one fixed-width record.
+    const recordLength = getRecordLength(fields);
+    const text = new TextDecoder().decode(dataSource);
+    const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+    const rows = lines.map((line) => decomposeStream(fields, line));
+    const lengthMismatch = lines.length > 0 && lines[0].length !== recordLength;
+    return { rows, recordLength, warnings: [], lengthMismatch };
+  }, [fields, dataSource, binaryMode]);
+
+  const { rows, recordLength, warnings, lengthMismatch } = decoded;
+  const ready = fields.length > 0 && rows.length > 0;
 
   const dataFieldCount = useMemo(() => fields.filter(isDataField).length, [fields]);
   const includedCount = dataFieldCount - excluded.size;
 
   const preview = useMemo(
-    () => (ready ? delimitLines(fields, lines.slice(0, 5), delimiter, excluded) : []),
-    [ready, fields, lines, delimiter, excluded],
+    () => (ready ? delimitRows(fields, rows.slice(0, 5), delimiter, excluded) : []),
+    [ready, fields, rows, delimiter, excluded],
   );
 
-  // Records whose data contains the delimiter itself — their values get quoted, but warn so
-  // the user can pick a collision-free delimiter for consumers that don't understand quotes.
+  // Records whose decoded values contain the delimiter — they get quoted, but warn so the
+  // user can pick a collision-free delimiter for consumers that don't understand quotes.
   const collisionCount = useMemo(
-    () => (ready ? lines.filter((l) => l.includes(delimiter)).length : 0),
-    [ready, lines, delimiter],
+    () =>
+      ready
+        ? rows.filter((row) =>
+            row.some((d) => isDataField(d) && !excluded.has(d.id) && d.value.includes(delimiter)),
+          ).length
+        : 0,
+    [ready, rows, delimiter, excluded],
   );
 
   // Per-field values of the first and last record, for crosschecking the split.
   const crosscheck = useMemo(() => {
     if (!ready) return [];
-    const first = decomposeStream(fields, lines[0]).filter(isDataField);
-    const last =
-      lines.length > 1 ? decomposeStream(fields, lines[lines.length - 1]).filter(isDataField) : first;
+    const first = rows[0].filter(isDataField);
+    const last = (rows.length > 1 ? rows[rows.length - 1] : rows[0]).filter(isDataField);
     return first.map((f, i) => ({ id: f.id, name: f.name, pic: f.picRaw, first: f.value, last: last[i]?.value ?? "" }));
-  }, [ready, fields, lines]);
+  }, [ready, rows]);
 
   const handleDownload = () => {
-    const blob = new Blob([delimitLines(fields, lines, delimiter, excluded).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([delimitRows(fields, rows, delimiter, excluded).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "delimiter-export.csv";
     a.click();
     URL.revokeObjectURL(a.href);
-    toast({ title: "Delimiter Export", description: `${lines.length} record${lines.length === 1 ? "" : "s"} exported.` });
+    toast({ title: "Delimiter Export", description: `${rows.length} record${rows.length === 1 ? "" : "s"} exported.` });
   };
 
   const clearAll = () => {
     setCopybookSource("");
-    setDataSource("");
+    setDataSource(null);
     setExcluded(new Set());
     toast({ title: "Cleared", description: "Delimiter Export tab data has been reset." });
   };
@@ -138,7 +172,7 @@ export function DelimiterExportTab({
           size="sm"
           onClick={clearAll}
           className="h-7 text-xs"
-          disabled={!copybookSource.trim() && !dataSource.trim()}
+          disabled={!copybookSource.trim() && !dataSource}
         >
           <Trash2 className="w-3 h-3 mr-1.5" />
           Clear Tab
@@ -152,34 +186,51 @@ export function DelimiterExportTab({
               loaded={copybookSource.trim().length > 0}
               loadedNote={
                 fields.length > 0
-                  ? `${fields.filter((f) => !f.isGroup).length} fields, ${recordLength} bytes/record`
+                  ? `${fields.filter((f) => !f.isGroup).length} fields, ${binaryMode ? `${recordLength || "?"} bytes/record (COMP-3 packed)` : `${getRecordLength(fields)} bytes/record`}`
                   : "couldn't parse any fields"
               }
-              onLoad={(text) => {
+              onLoadText={(text) => {
                 setCopybookSource(text);
                 setExcluded(new Set());
               }}
             />
+            {binaryMode && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Binary className="w-3.5 h-3.5" />
+                COMP-3 detected — upload the record file as binary (.dat). Text fields are decoded as EBCDIC.
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <FileUpload
               label="Record Lines"
-              loaded={dataSource.length > 0}
-              loadedNote={lines.length > 0 ? `${lines.length} records × ${lines[0].length} bytes` : "file is empty"}
-              onLoad={(text) => setDataSource(text)}
+              loaded={!!dataSource && dataSource.length > 0}
+              loadedNote={
+                rows.length > 0
+                  ? `${rows.length} record${rows.length === 1 ? "" : "s"} × ${recordLength} bytes`
+                  : dataSource && dataSource.length > 0
+                  ? `${dataSource.length} bytes — upload a copybook to decode`
+                  : "file is empty"
+              }
+              onLoadBytes={(bytes) => setDataSource(bytes)}
             />
             {lengthMismatch && (
               <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-500">
-                Record length ({lines[0].length}) doesn't match the copybook's expected length ({recordLength}).
+                Record length doesn't match the copybook's expected length ({recordLength}).
               </p>
             )}
+            {warnings.map((w, i) => (
+              <p key={i} className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-500">
+                {w}
+              </p>
+            ))}
           </CardContent>
         </Card>
       </div>
 
-      {!ready && (copybookSource.trim() || dataSource.trim()) && (
+      {!ready && (copybookSource.trim() || dataSource) && (
         <EmptyState>Upload both a valid copybook and a record lines file to export.</EmptyState>
       )}
 
@@ -188,7 +239,7 @@ export function DelimiterExportTab({
           <CardContent className="pt-6 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">
-                Preview{lines.length > 5 ? ` (first 5 of ${lines.length})` : ""}
+                Preview{rows.length > 5 ? ` (first 5 of ${rows.length})` : ""}
               </h3>
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5">
@@ -211,14 +262,15 @@ export function DelimiterExportTab({
                   title="Download all records as delimited values, one column per checked copybook field"
                 >
                   <Download className="w-3 h-3 mr-1.5" />
-                  Download CSV ({lines.length})
+                  Download CSV ({rows.length})
                 </Button>
               </div>
             </div>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-500" />
-              Input: {lines.length} record{lines.length === 1 ? "" : "s"} → CSV: {lines.length + 1} rows
-              ({lines.length} data + 1 header), {includedCount} of {dataFieldCount} fields
+              Input: {rows.length} record{rows.length === 1 ? "" : "s"} → CSV: {rows.length + 1} rows
+              ({rows.length} data + 1 header), {includedCount} of {dataFieldCount} fields
+              {binaryMode ? " — binary COMP-3 mode" : ""}
             </p>
             {includedCount === 0 && (
               <p className="text-[11px] text-amber-600 dark:text-amber-500">
@@ -259,7 +311,7 @@ export function DelimiterExportTab({
                     <TableHead className="text-xs">Field</TableHead>
                     <TableHead className="text-xs">Type</TableHead>
                     <TableHead className="text-xs">Record 1</TableHead>
-                    <TableHead className="text-xs">Record {lines.length} (last)</TableHead>
+                    <TableHead className="text-xs">Record {rows.length} (last)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
