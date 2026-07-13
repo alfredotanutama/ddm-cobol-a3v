@@ -20,6 +20,7 @@ import {
   logout,
 } from "@/components/auth";
 import { BroadcastBanner, BroadcastDialog } from "@/components/broadcast";
+import { version } from "../package.json";
 
 const queryClient = new QueryClient();
 
@@ -152,7 +153,7 @@ function AppInner() {
             </main>
             <footer className="border-t">
               <div className="container mx-auto px-4 py-3 max-w-6xl text-xs text-muted-foreground">
-                DDM Stream for COBOLers v{__APP_VERSION__}
+                DDM Stream for COBOLers v{version}
               </div>
             </footer>
     </div>
