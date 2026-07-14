@@ -1,3 +1,111 @@
+PERUBAHAN — 2026-07-14 (opsi "Numbers as number" di CSV)
+========================================================
+
+Fitur: checkbox "Numbers as number" di samping input Delimiter. Default mati =
+nilai numerik tampil raw fixed-width sesuai PIC (mis. AMOUNT PIC 9(5)V99 nilai
+123.45 -> "00123.45"). Dicentang = leading zero dibuang sehingga CSV berisi
+angka murni ("123.45", "-123.45", "00000" -> "0"). Trimming pakai string
+(bukan Number()) agar nilai 15+ digit tidak kehilangan presisi. Hanya field
+PIC 9/S9 yang terpengaruh; field X dengan angka (mis. "00123") tetap utuh
+karena leading zero-nya adalah data. Berlaku di preview, warning delimiter,
+dan file CSV. Reset saat Clear Tab.
+
+FILE YANG DIUBAH:
+- src/lib/delimit.ts: helper trimNumericValue + trimNumericRows.
+- src/components/delimiter-export-tab.tsx: state numbersAsNumber + checkbox;
+  preview/collision/download memakai csvRows (rows yang sudah di-trim).
+- src/lib/delimit.test.ts: assert trimming (positif/negatif/nol/15 digit) dan
+  field X tidak tersentuh.
+
+CATATAN/LOG:
+- node delimit.test.ts & comp3.test.ts lulus; npx tsc --noEmit bersih.
+- Dites di localhost:5173 (vercel dev). Belum di-commit/deploy.
+
+PERUBAHAN — 2026-07-14 (checkbox abaikan low-values + nama file CSV bertimestamp)
+=================================================================================
+
+Fitur 1: checkbox "Ignore trailing low-values per record" di kartu Record Lines
+(mode binary). Untuk kasus copybook lebih pendek dari panjang record file
+(LRECL) — analogi: copybook 432 byte vs record file 450 byte — tiap record
+diakhiri padding low-value/spasi sehingga record ke-2 dst bergeser. Dengan
+checkbox aktif, stride record sebenarnya dideteksi otomatis (pembagi terkecil
+dari ukuran file yang area padding-nya hanya 0x00/0x40 di SEMUA record) dan
+padding dilewati — tidak perlu menambah FILLER ke copybook dulu. Jika tidak
+ada stride yang lolos validasi, kembali ke panjang copybook (aman). Warning
+informatif menyebut berapa byte padding yang diabaikan. Reset saat Clear Tab.
+
+Fitur 2: file CSV yang di-download sekarang bernama
+ddm_generated_MMDDYY_HHMMSS.csv (timestamp waktu download), bukan
+delimiter-export.csv.
+
+FILE YANG DIUBAH:
+- src/lib/comp3.ts: detectStride() + parameter opsional ignorePadding di
+  decomposeBinaryRecords(); recordLength yang dilaporkan = stride file.
+- src/components/delimiter-export-tab.tsx: state ignorePadding + checkbox,
+  diteruskan ke decoder; nama file download bertimestamp.
+- src/lib/comp3.test.ts: kasus padding on/off, stride ditolak bila area pad
+  berisi data asli.
+- parser_cobol_guide.md: §10 aturan ignore trailing low-values.
+
+CATATAN/LOG:
+- Divalidasi terhadap file data mainframe lokal (rahasia, di luar git):
+  copybook tanpa FILLER penutup + checkbox aktif -> stride record terdeteksi
+  benar, semua record sejajar, nilai cocok dengan tampilan ISPF.
+- node comp3.test.ts & delimit.test.ts lulus; npx tsc --noEmit bersih.
+- Dites di localhost:5173 (vercel dev). Belum di-commit/deploy.
+
+PERUBAHAN — 2026-07-14 (drag & drop upload di Delimiter Export)
+===============================================================
+
+Fitur: kedua area upload di tab Delimiter Export (copybook & data file)
+sekarang menerima drag & drop file, selain tombol "Upload file". Saat file
+diseret di atas area, border putus-putus menyala sebagai indikator drop zone.
+Teks kecil "or drag & drop here" ditambahkan di bawah tombol.
+
+FILE YANG DIUBAH:
+- src/components/delimiter-export-tab.tsx: komponen FileUpload — logika baca
+  file dipisah ke readFile(File), handler onDragOver/onDragLeave/onDrop pada
+  wrapper, state dragOver untuk highlight.
+
+CATATAN/LOG:
+- npx tsc --noEmit bersih; dites di localhost:5173 (vercel dev).
+- Belum di-commit/deploy (menunggu perintah).
+
+PERUBAHAN — 2026-07-14 (dukungan COMP / BINARY di Delimiter Export)
+===================================================================
+
+Fitur: field PIC 9/S9 dengan COMP / COMPUTATIONAL / COMP-4 / BINARY (tipe "BI"
+di ISPF) sekarang didukung di mode binary Delimiter Export. Sebelumnya hanya
+COMP-3; field COMP dibaca salah sebagai teks EBCDIC sehingga seluruh record
+bergeser dan file tidak bisa didecode.
+
+Aturan: COMP = integer biner big-endian two's-complement.
+  1–4 digit -> 2 byte, 5–9 digit -> 4 byte, 10–18 digit -> 8 byte.
+  PIC 9 (tanpa S) dibaca unsigned; skala V dan format output fixed-width
+  sama dengan COMP-3. COMP-1/COMP-2 (float) tetap tidak didukung.
+Mode binary aktif bila copybook mengandung COMP-3 ATAU COMP.
+
+FILE YANG DIUBAH:
+- src/lib/cobol.ts: deteksi isCompBinary (regex menolak COMP-1/-2/-5),
+  diteruskan ke ParsedField.
+- src/lib/comp3.ts: packedByteLength (2/4/8 byte), decodeBinaryField cabang
+  BigInt big-endian, helper formatDigits dipakai bersama COMP-3.
+- src/components/delimiter-export-tab.tsx: binaryMode juga cek isCompBinary.
+- src/lib/comp3.test.ts: kasus COMP baru (0x0168=360 dari data asli, negatif
+  two's-complement, unsigned, doubleword, V99, flag COMP-1/-4/BINARY).
+- parser_cobol_guide.md: §10 aturan COMP, §11 batasan diperbarui.
+
+CATATAN/LOG:
+- Divalidasi end-to-end terhadap file data mainframe lokal (rahasia, di
+  luar git): semua nilai sampel cocok persis dengan tampilan ISPF
+  (ZD/AN/PD/BI), termasuk field COMP 2-byte (halfword) dan FILLER 0x00
+  tampil sebagai titik.
+- Analogi kasus: copybook yang lebih pendek dari LRECL file perlu ditambah
+  FILLER PIC X(n) di akhir (atau pakai checkbox ignore low-values). Ini
+  perbaikan di copybook, bukan di program.
+- node comp3.test.ts & delimit.test.ts lulus; npx tsc --noEmit bersih;
+  vite build sukses. Belum di-commit/deploy (menunggu perintah).
+
 PERUBAHAN — 2026-07-14 (COMP-3 binary + versi di footer) — v1.5.0
 ==================================================================
 

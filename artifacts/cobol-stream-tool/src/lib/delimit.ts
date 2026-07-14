@@ -9,6 +9,23 @@ export const escapeValue = (s: string, delim: string) =>
 export const isDataField = (f: ParsedField) =>
   !f.isGroup && f.length > 0 && (!f.isFiller || f.initialValue !== null);
 
+/**
+ * Trims a numeric field's fixed-width value to a plain number:
+ * "00123.45" -> "123.45", "-00123.45" -> "-123.45", "00000" -> "0".
+ * String trimming (not Number()) so 15+ digit values never lose precision.
+ */
+export const trimNumericValue = (s: string) => s.replace(/^(-?)0+(?=\d)/, "$1");
+
+/** Applies trimNumericValue to every numeric (PIC 9/S9) column of decoded rows. */
+export const trimNumericRows = (rows: DecomposedField[][]): DecomposedField[][] =>
+  rows.map((row) =>
+    row.map((d) =>
+      !d.isGroup && (d.type === "9" || d.type === "S9")
+        ? { ...d, value: trimNumericValue(d.value) }
+        : d,
+    ),
+  );
+
 /** Header + one delimited row per decomposed record. Fields whose id is in `excluded` are left out. */
 export function delimitRows(
   fields: ParsedField[],

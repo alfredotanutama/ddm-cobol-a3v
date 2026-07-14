@@ -16,6 +16,7 @@ export interface ParsedField {
   length: number; // total byte length in the stream (includes decimal digits for V99 fields, excludes the decimal point itself)
   decimals: number; // number of implied decimal digits (0 if none)
   isComp3: boolean; // COMP-3 fields are displayed as plain numbers (no packed-decimal conversion), per spec
+  isCompBinary: boolean; // COMP/COMP-4/BINARY — big-endian two's-complement int in binary .dat records
   redefines: string | null; // name of the field/group this field redefines, if any
   indent: number; // 0 = top-level field, 1 = inside a REDEFINES sub-group (single level supported)
   start: number; // byte offset (0-indexed) within the generated/decomposed stream
@@ -125,6 +126,7 @@ interface RawLine {
   length: number;
   decimals: number;
   isComp3: boolean;
+  isCompBinary: boolean;
   isGroup: boolean; // true when the line has no PIC clause (group header)
   initialValue: string | null;
 }
@@ -238,6 +240,10 @@ function parseLine(line: string): RawLine | null {
 
   const picMatch = afterLevel.match(/PIC(?:TURE)?\s+([SX9V()0-9]+)/i);
   const isComp3 = /COMP-3|COMPUTATIONAL-3/i.test(afterLevel);
+  // COMP / COMPUTATIONAL / COMP-4 / BINARY = big-endian binary int. The lookahead
+  // rejects COMP-1/-2/-5 (and COMP-3, already handled above).
+  const isCompBinary =
+    !isComp3 && /\b(?:COMP(?:UTATIONAL)?(?:-4)?|BINARY)(?![-\w])/i.test(afterLevel);
 
   if (!picMatch) {
     return {
@@ -250,6 +256,7 @@ function parseLine(line: string): RawLine | null {
       length: 0,
       decimals: 0,
       isComp3,
+      isCompBinary,
       isGroup: true,
       initialValue: null,
     };
@@ -269,6 +276,7 @@ function parseLine(line: string): RawLine | null {
     length,
     decimals,
     isComp3,
+    isCompBinary,
     isGroup: false,
     initialValue,
   };
@@ -322,6 +330,7 @@ export function parseCopybook(source: string): ParsedField[] {
           length: 0,
           decimals: 0,
           isComp3: false,
+          isCompBinary: false,
           redefines: parsed.redefines,
           indent: shadowLevel !== null ? 1 : 0,
           start: groupStart,
@@ -351,6 +360,7 @@ export function parseCopybook(source: string): ParsedField[] {
           length: 0,
           decimals: 0,
           isComp3: false,
+          isCompBinary: false,
           redefines: null,
           indent: shadowLevel !== null ? 1 : 0,
           start: shadowLevel !== null ? shadowCursor : cursor,
@@ -399,6 +409,7 @@ export function parseCopybook(source: string): ParsedField[] {
       length: parsed.length,
       decimals: parsed.decimals,
       isComp3: parsed.isComp3,
+      isCompBinary: parsed.isCompBinary,
       redefines: parsed.redefines,
       indent,
       start,

@@ -142,11 +142,23 @@ text (per original spec) — no packing.
 - Output formatting: **raw fixed width** — full PIC digit count, zero-padded, `.` inserted at
   the V position, `-` prefix for negative. (`0030001141`, `013`, `0000000000001.50`.)
 - Non-printable bytes in text fields render as `.` — same as ISPF hex view.
+- **COMP / COMPUTATIONAL / COMP-4 / BINARY** (ISPF `BI`) fields are big-endian two's-complement
+  binary ints: 1–4 digits → 2 bytes, 5–9 → 4 bytes, 10–18 → 8 bytes. Unsigned `PIC 9` COMP is
+  read unsigned; `V` scaling and the raw fixed-width output format are the same as COMP-3.
+  COMP-1/COMP-2 (float) remain unsupported. Any COMP or COMP-3 field triggers binary mode.
+  (Validated byte-for-byte against a real mainframe dataset and its ISPF view — kept locally,
+  outside git. Typical gotcha: a copybook shorter than the file's LRECL needs a trailing
+  `FILLER PIC X(n)` added — or the ignore-trailing-low-values checkbox below.)
 - Records that are entirely `0x00` (tail padding) are skipped with a warning; leftover bytes
   that don't fill a whole record also warn.
+- **Ignore trailing low-values** (opt-in checkbox): when the copybook is shorter than the
+  file's LRECL, each record ends in low-value/space filler. With the checkbox on, the real
+  record stride is detected (smallest divisor of the file length whose pad region is only
+  `0x00`/`0x40` in every record) and the padding is skipped — no need to append a FILLER to
+  the copybook. Falls back to the copybook length if no stride qualifies.
 
 ## 11. Known limits (deliberate)
 
 - One level of REDEFINES nesting; `OCCURS` not supported; `HIGH/LOW-VALUES` not supported;
-  `COMP`/`COMP-1`/`COMP-2` (binary/float) not supported — only COMP-3.
+  `COMP-1`/`COMP-2` (float) not supported — COMP-3 (packed) and COMP/COMP-4/BINARY (int) are.
 - EBCDIC codepage is CP037, assumed automatically for binary COMP-3 files (no toggle).

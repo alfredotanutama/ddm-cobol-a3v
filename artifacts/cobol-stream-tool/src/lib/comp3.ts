@@ -26,10 +26,12 @@ for (let i = 0; i < 10; i++) EBCDIC_PRINTABLE[0xf0 + i] = String.fromCharCode(48
 
 export const ebcdicToAscii = (byte: number): string => EBCDIC_PRINTABLE[byte] ?? ".";
 
-/** Byte length of one field inside a BINARY record: packed for COMP-3, 1 byte/char otherwise. */
+/** Byte length of one field inside a BINARY record: packed for COMP-3, halfword/word/doubleword for COMP, 1 byte/char otherwise. */
 export function packedByteLength(field: ParsedField): number {
   if (field.isGroup) return 0;
-  return field.isComp3 ? Math.ceil((field.length + 1) / 2) : field.length;
+  if (field.isComp3) return Math.ceil((field.length + 1) / 2);
+  if (field.isCompBinary) return field.length <= 4 ? 2 : field.length <= 9 ? 4 : 8;
+  return field.length;
 }
 
 export interface BinaryLayout {
@@ -82,16 +84,34 @@ export function binaryLayout(fields: ParsedField[]): BinaryLayout {
   return { byId, recordLength };
 }
 
+/** Formats a decoded digit string to RAW FIXED-WIDTH: full PIC digit count, zero-padded, "." at the V position, "-" prefix. */
+function formatDigits(field: ParsedField, digits: string, negative: boolean): string {
+  digits = digits.slice(-field.length).padStart(field.length, "0");
+  const intLen = field.length - field.decimals;
+  const body =
+    field.decimals > 0 ? `${digits.slice(0, intLen)}.${digits.slice(intLen)}` : digits;
+  return `${negative ? "-" : ""}${body}`;
+}
+
 /**
  * Decodes one field's bytes to its display value.
  * COMP-3: nibbles = digits, last nibble = sign (C/F/A/E = +, D/B = −), formatted RAW
  * FIXED-WIDTH (full PIC digit count, zero-padded, "." at the V position, "-" prefix).
+ * COMP (binary): big-endian two's-complement int, same fixed-width formatting.
  * DISPLAY fields: EBCDIC per byte, non-printables as ".".
  */
 export function decodeBinaryField(
   field: ParsedField,
   bytes: Uint8Array,
 ): { value: string; warning: string | null } {
+  if (field.isCompBinary) {
+    let v = 0n;
+    for (const b of bytes) v = (v << 8n) | BigInt(b);
+    const bits = BigInt(bytes.length * 8);
+    if (field.type === "S9" && v >= 1n << (bits - 1n)) v -= 1n << bits; // two's complement
+    return { value: formatDigits(field, (v < 0n ? -v : v).toString(), v < 0n), warning: null };
+  }
+
   if (!field.isComp3) {
     let out = "";
     for (const b of bytes) out += ebcdicToAscii(b);
@@ -117,13 +137,8 @@ export function decodeBinaryField(
       digits += String(n);
     }
   }
-  // Packed storage holds an odd digit count; keep the PIC's exact digit width.
-  digits = digits.slice(-field.length).padStart(field.length, "0");
-
-  const intLen = field.length - field.decimals;
-  const body =
-    field.decimals > 0 ? `${digits.slice(0, intLen)}.${digits.slice(intLen)}` : digits;
-  return { value: `${negative ? "-" : ""}${body}`, warning };
+  // Packed storage holds an odd digit count; formatDigits keeps the PIC's exact digit width.
+  return { value: formatDigits(field, digits, negative), warning };
 }
 
 const toHex = (bytes: Uint8Array): string =>
@@ -139,10 +154,38 @@ export interface BinaryDecomposition {
   leftoverBytes: number;
 }
 
-/** Splits a binary .dat buffer into records and decodes every field of every record. */
+/**
+ * Finds the real record stride when the copybook is shorter than the file's LRECL —
+ * each record is copybook bytes + trailing low-value/space filler. Returns the smallest
+ * stride that divides the file AND whose pad region is only 0x00 / EBCDIC space in EVERY
+ * record; falls back to the copybook length when none qualifies.
+ */
+function detectStride(recordLength: number, data: Uint8Array): number {
+  if (data.length % recordLength === 0) return recordLength;
+  for (let L = recordLength + 1; L <= data.length; L++) {
+    if (data.length % L !== 0) continue;
+    let ok = true;
+    for (let i = 0; i < data.length && ok; i += L) {
+      for (let p = i + recordLength; p < i + L; p++) {
+        const b = data[p];
+        if (b !== 0x00 && b !== 0x40) { ok = false; break; }
+      }
+    }
+    if (ok) return L;
+  }
+  return recordLength;
+}
+
+/**
+ * Splits a binary .dat buffer into records and decodes every field of every record.
+ * With `ignorePadding`, trailing low-value/space filler after each record (copybook
+ * shorter than the file's LRECL) is detected and skipped, so the user doesn't have to
+ * append a FILLER to the copybook first.
+ */
 export function decomposeBinaryRecords(
   fields: ParsedField[],
   data: Uint8Array,
+  ignorePadding = false,
 ): BinaryDecomposition {
   const { byId, recordLength } = binaryLayout(fields);
   const records: DecomposedField[][] = [];
@@ -153,11 +196,18 @@ export function decomposeBinaryRecords(
     return { records, warnings, recordLength, skippedZeroRecords, leftoverBytes: data.length };
   }
 
-  const fullRecords = Math.floor(data.length / recordLength);
-  const leftoverBytes = data.length % recordLength;
+  const stride = ignorePadding ? detectStride(recordLength, data) : recordLength;
+  if (stride !== recordLength) {
+    warnings.push(
+      `Records are ${stride} bytes in the file; the copybook describes ${recordLength} — the trailing ${stride - recordLength} bytes of low-value/space padding per record were ignored.`,
+    );
+  }
+
+  const fullRecords = Math.floor(data.length / stride);
+  const leftoverBytes = data.length % stride;
 
   for (let r = 0; r < fullRecords; r++) {
-    const rec = data.subarray(r * recordLength, (r + 1) * recordLength);
+    const rec = data.subarray(r * stride, (r + 1) * stride);
     if (rec.every((b) => b === 0)) {
       skippedZeroRecords++;
       continue;
@@ -180,9 +230,10 @@ export function decomposeBinaryRecords(
   }
   if (leftoverBytes > 0) {
     warnings.push(
-      `${leftoverBytes} leftover byte${leftoverBytes === 1 ? "" : "s"} at the end of the file don't fill a whole ${recordLength}-byte record.`,
+      `${leftoverBytes} leftover byte${leftoverBytes === 1 ? "" : "s"} at the end of the file don't fill a whole ${stride}-byte record.`,
     );
   }
 
-  return { records, warnings, recordLength, skippedZeroRecords, leftoverBytes };
+  // recordLength reported to the UI = actual bytes per record in the file (incl. any padding).
+  return { records, warnings, recordLength: stride, skippedZeroRecords, leftoverBytes };
 }

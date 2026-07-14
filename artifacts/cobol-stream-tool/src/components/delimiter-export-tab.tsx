@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { parseCopybook, getRecordLength, decomposeStream, type DecomposedField } from "@/lib/cobol";
 import { decomposeBinaryRecords } from "@/lib/comp3";
-import { delimitRows, isDataField } from "@/lib/delimit";
+import { delimitRows, isDataField, trimNumericRows } from "@/lib/delimit";
 import { EmptyState } from "./empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -27,9 +27,9 @@ function FileUpload({
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
+  const [dragOver, setDragOver] = useState(false);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const readFile = (file: File | undefined) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
@@ -44,17 +44,36 @@ function FileUpload({
     };
     if (onLoadBytes) reader.readAsArrayBuffer(file);
     else reader.readAsText(file);
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    readFile(e.target.files?.[0]);
     e.target.value = "";
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      className={`flex flex-col gap-2 rounded-md border border-dashed p-3 transition-colors ${
+        dragOver ? "border-primary bg-primary/5" : "border-transparent"
+      }`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        readFile(e.dataTransfer.files?.[0]);
+      }}
+    >
       <Label>{label}</Label>
       <input type="file" hidden ref={ref} onChange={handleFile} />
       <Button variant="outline" size="sm" className="w-fit h-8 text-xs" onClick={() => ref.current?.click()}>
         <Upload className="w-3 h-3 mr-1.5" />
         Upload file
       </Button>
+      <p className="text-[11px] text-muted-foreground/70">or drag &amp; drop here</p>
       {loaded && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-500" />
@@ -81,6 +100,10 @@ export function DelimiterExportTab({
   const delimiter = delimiterInput || ",";
   // Field ids the user unchecked — left out of the CSV columns.
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  // Skip trailing low-value/space padding per record (copybook shorter than the file's LRECL).
+  const [ignorePadding, setIgnorePadding] = useState(false);
+  // Export numeric fields as plain numbers (123.45) instead of raw fixed-width (00123.45).
+  const [numbersAsNumber, setNumbersAsNumber] = useState(false);
 
   const fields = useMemo(() => {
     try {
@@ -90,8 +113,8 @@ export function DelimiterExportTab({
     }
   }, [copybookSource]);
 
-  // Any COMP-3 field switches the record file to binary mode (packed decimal + EBCDIC text).
-  const binaryMode = useMemo(() => fields.some((f) => f.isComp3), [fields]);
+  // Any COMP-3 or COMP (binary) field switches the record file to binary mode (packed decimal + EBCDIC text).
+  const binaryMode = useMemo(() => fields.some((f) => f.isComp3 || f.isCompBinary), [fields]);
 
   // Decode all records once; every view (preview, crosscheck, download) reads from `rows`.
   const decoded = useMemo((): {
@@ -104,7 +127,7 @@ export function DelimiterExportTab({
       return { rows: [], recordLength: 0, warnings: [], lengthMismatch: false };
     }
     if (binaryMode) {
-      const { records, warnings, recordLength } = decomposeBinaryRecords(fields, dataSource);
+      const { records, warnings, recordLength } = decomposeBinaryRecords(fields, dataSource, ignorePadding);
       return { rows: records, recordLength, warnings, lengthMismatch: false };
     }
     // Text mode: each non-empty line is one fixed-width record.
@@ -114,17 +137,23 @@ export function DelimiterExportTab({
     const rows = lines.map((line) => decomposeStream(fields, line));
     const lengthMismatch = lines.length > 0 && lines[0].length !== recordLength;
     return { rows, recordLength, warnings: [], lengthMismatch };
-  }, [fields, dataSource, binaryMode]);
+  }, [fields, dataSource, binaryMode, ignorePadding]);
 
   const { rows, recordLength, warnings, lengthMismatch } = decoded;
   const ready = fields.length > 0 && rows.length > 0;
+
+  // Rows as they'll appear in the CSV (numeric trimming applied when chosen).
+  const csvRows = useMemo(
+    () => (numbersAsNumber ? trimNumericRows(rows) : rows),
+    [rows, numbersAsNumber],
+  );
 
   const dataFieldCount = useMemo(() => fields.filter(isDataField).length, [fields]);
   const includedCount = dataFieldCount - excluded.size;
 
   const preview = useMemo(
-    () => (ready ? delimitRows(fields, rows.slice(0, 5), delimiter, excluded) : []),
-    [ready, fields, rows, delimiter, excluded],
+    () => (ready ? delimitRows(fields, csvRows.slice(0, 5), delimiter, excluded) : []),
+    [ready, fields, csvRows, delimiter, excluded],
   );
 
   // Records whose decoded values contain the delimiter — they get quoted, but warn so the
@@ -132,11 +161,11 @@ export function DelimiterExportTab({
   const collisionCount = useMemo(
     () =>
       ready
-        ? rows.filter((row) =>
+        ? csvRows.filter((row) =>
             row.some((d) => isDataField(d) && !excluded.has(d.id) && d.value.includes(delimiter)),
           ).length
         : 0,
-    [ready, rows, delimiter, excluded],
+    [ready, csvRows, delimiter, excluded],
   );
 
   // Per-field values of the first and last record, for crosschecking the split.
@@ -148,10 +177,14 @@ export function DelimiterExportTab({
   }, [ready, rows]);
 
   const handleDownload = () => {
-    const blob = new Blob([delimitRows(fields, rows, delimiter, excluded).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([delimitRows(fields, csvRows, delimiter, excluded).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "delimiter-export.csv";
+    // ddm_generated_MMDDYY_HHMMSS.csv
+    const now = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${p(now.getMonth() + 1)}${p(now.getDate())}${String(now.getFullYear()).slice(-2)}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+    a.download = `ddm_generated_${stamp}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     toast({ title: "Delimiter Export", description: `${rows.length} record${rows.length === 1 ? "" : "s"} exported.` });
@@ -161,6 +194,8 @@ export function DelimiterExportTab({
     setCopybookSource("");
     setDataSource(null);
     setExcluded(new Set());
+    setIgnorePadding(false);
+    setNumbersAsNumber(false);
     toast({ title: "Cleared", description: "Delimiter Export tab data has been reset." });
   };
 
@@ -216,6 +251,20 @@ export function DelimiterExportTab({
               }
               onLoadBytes={(bytes) => setDataSource(bytes)}
             />
+            {binaryMode && (
+              <div className="mt-2 flex items-start gap-2">
+                <Checkbox
+                  id="ignore-padding"
+                  checked={ignorePadding}
+                  onCheckedChange={(v) => setIgnorePadding(v === true)}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="ignore-padding" className="text-[11px] font-normal text-muted-foreground leading-snug cursor-pointer">
+                  Ignore trailing low-values per record — use when the copybook is shorter than the
+                  file's record length (no need to add a FILLER to the copybook).
+                </Label>
+              </div>
+            )}
             {lengthMismatch && (
               <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-500">
                 Record length doesn't match the copybook's expected length ({recordLength}).
@@ -253,6 +302,20 @@ export function DelimiterExportTab({
                     maxLength={3}
                     className="h-7 w-14 text-center text-xs font-mono"
                   />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Checkbox
+                    id="numbers-as-number"
+                    checked={numbersAsNumber}
+                    onCheckedChange={(v) => setNumbersAsNumber(v === true)}
+                  />
+                  <Label
+                    htmlFor="numbers-as-number"
+                    className="text-xs font-normal text-muted-foreground cursor-pointer"
+                    title="Numeric fields exported as plain numbers (123.45) instead of raw fixed-width (00123.45)"
+                  >
+                    Numbers as number
+                  </Label>
                 </div>
                 <Button
                   size="sm"
