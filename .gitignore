@@ -11,3 +11,8 @@ COMP3VIEWDATA.txt
 TESTFILE/
 CASEFILE/
 .DS_Store
+
+# Local-only: never commit test data, dumps, or reference docs
+parse_os.py
+parse_*.txt
+*.xlsx
