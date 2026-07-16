@@ -24,6 +24,8 @@ export interface ParsedField {
   groupNote: string | null; // display text shown in place of an input for a group header row, e.g. "Redefines X" or "Record Description"
   kind: FieldKind; // semantic category (ALPHA/NUMERIC/DECIMAL/SIGNED/SIGNED_DEC/GROUP) used to drive input formatting/assistance in the UI
   initialValue: string | null; // literal from a VALUE clause (e.g. VALUE 'X'); FILLER fields with one behave like normal editable fields
+  parseWarning: string | null; // non-null when the line uses a clause this parser doesn't support (OCCURS, SYNC, SIGN SEPARATE, ...) — offsets/values may be wrong
+  alphaOnly: boolean; // PIC A(n): only letters and spaces are valid content — decompose warns on anything else
 }
 
 // === Overpunch (signed numeric, PIC S9) encode/decode tables ===
@@ -129,6 +131,8 @@ interface RawLine {
   isCompBinary: boolean;
   isGroup: boolean; // true when the line has no PIC clause (group header)
   initialValue: string | null;
+  parseWarning: string | null;
+  alphaOnly: boolean;
 }
 
 function stripPrefixAndComments(line: string): string | null {
@@ -153,7 +157,13 @@ function stripPrefixAndComments(line: string): string | null {
   return rest;
 }
 
-function parsePicture(pic: string): { type: PicType; length: number; decimals: number } {
+function parsePicture(pic: string): {
+  type: PicType;
+  length: number;
+  decimals: number;
+  picWarning: string | null;
+  alphaOnly: boolean;
+} {
   const isSigned = /^\s*S/i.test(pic);
   const body = isSigned ? pic.replace(/^\s*S/i, "") : pic;
 
@@ -162,8 +172,13 @@ function parsePicture(pic: string): { type: PicType; length: number; decimals: n
   let type: PicType = "X";
   let afterV = false;
   let sawFirstChar = false;
+  let edited = false;
+  let hasP = false;
+  let sawA = false;
+  let sawOther = false;
 
-  const re = /([9XV])(\((\d+)\))?/gi;
+  // CR/DB take 2 bytes; every other symbol takes 1 (V, P take none).
+  const re = /(CR|DB|[9XAV]|[ZB0/.,*$+-]|P)(\((\d+)\))?/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) {
     const ch = m[1].toUpperCase();
@@ -173,21 +188,38 @@ function parsePicture(pic: string): { type: PicType; length: number; decimals: n
       afterV = true;
       continue;
     }
+    if (ch === "P") {
+      hasP = true;
+      continue;
+    }
 
     if (!sawFirstChar) {
       type = ch === "9" ? "9" : "X";
       sawFirstChar = true;
     }
+    if (!/^(9|X|A)$/.test(ch)) edited = true;
+    if (ch === "A") sawA = true;
+    else sawOther = true;
 
-    length += count;
+    length += (ch === "CR" || ch === "DB" ? 2 : 1) * count;
     if (afterV) decimals += count;
   }
 
-  if (isSigned && type === "9") {
+  let picWarning: string | null = null;
+  if (edited) {
+    // Edited fields (Z * $ , . etc.) are treated as raw text of the correct byte
+    // length — output editing/de-editing isn't implemented.
+    type = "X";
+    decimals = 0;
+    picWarning = `Edited PIC ${pic} treated as text (${length} bytes)`;
+  } else if (isSigned && type === "9") {
     type = "S9";
   }
+  if (hasP) {
+    picWarning = `PIC ${pic}: P scaling unsupported — value will be unscaled`;
+  }
 
-  return { type, length, decimals };
+  return { type, length, decimals, picWarning, alphaOnly: sawA && !sawOther };
 }
 
 /**
@@ -238,12 +270,23 @@ function parseLine(line: string): RawLine | null {
   const redefinesMatch = afterLevel.match(/REDEFINES\s+([A-Za-z0-9\-]+)/i);
   const redefines = redefinesMatch ? redefinesMatch[1] : null;
 
-  const picMatch = afterLevel.match(/PIC(?:TURE)?\s+([SX9V()0-9]+)/i);
+  const picMatch = afterLevel.match(/PIC(?:TURE)?\s+([A-Za-z0-9().,*$/+-]+)/i);
   const isComp3 = /COMP-3|COMPUTATIONAL-3/i.test(afterLevel);
-  // COMP / COMPUTATIONAL / COMP-4 / BINARY = big-endian binary int. The lookahead
-  // rejects COMP-1/-2/-5 (and COMP-3, already handled above).
+  // COMP / COMPUTATIONAL / COMP-4 / BINARY / COMP-5 = big-endian binary int
+  // (COMP-5 is native binary; mainframe-native = big-endian, same sizes as COMP).
+  // The lookahead rejects COMP-1/-2 (and COMP-3, already handled above).
   const isCompBinary =
-    !isComp3 && /\b(?:COMP(?:UTATIONAL)?(?:-4)?|BINARY)(?![-\w])/i.test(afterLevel);
+    !isComp3 && /\b(?:COMP(?:UTATIONAL)?(?:-[45])?|BINARY)(?![-\w])/i.test(afterLevel);
+
+  // Clauses this parser doesn't implement — flag them instead of silently
+  // producing wrong offsets/values downstream.
+  const unsupported: string[] = [];
+  if (/\bOCCURS\b/i.test(afterLevel)) unsupported.push("OCCURS (only 1 occurrence counted)");
+  if (/\bSYNC(HRONIZED)?\b/i.test(afterLevel)) unsupported.push("SYNC (slack bytes not added)");
+  if (/\bSIGN\b[\s\S]*\bSEPARATE\b/i.test(afterLevel)) unsupported.push("SIGN SEPARATE (extra sign byte not counted)");
+  else if (/\bSIGN\s+(?:IS\s+)?LEADING\b/i.test(afterLevel)) unsupported.push("SIGN LEADING (sign decoded as trailing)");
+  if (/COMP(?:UTATIONAL)?-[12](?![-\w])/i.test(afterLevel)) unsupported.push("COMP-1/-2 float (treated as text)");
+  if (/\bRENAMES\b/i.test(afterLevel)) unsupported.push("RENAMES (ignored)");
 
   if (!picMatch) {
     return {
@@ -257,14 +300,18 @@ function parseLine(line: string): RawLine | null {
       decimals: 0,
       isComp3,
       isCompBinary,
+      alphaOnly: false,
       isGroup: true,
       initialValue: null,
+      parseWarning: unsupported.length ? `Unsupported: ${unsupported.join("; ")}` : null,
     };
   }
 
-  const picStr = picMatch[1];
-  const { type, length, decimals } = parsePicture(picStr);
+  const picStr = picMatch[1].replace(/\.$/, ""); // clause-terminating period
+  const { type, length, decimals, picWarning, alphaOnly } = parsePicture(picStr);
   const initialValue = parseValueClause(afterLevel, length);
+  if (picWarning) unsupported.push(picWarning);
+  if (length === 0) unsupported.push(`PIC ${picStr} not understood (counted as 0 bytes)`);
 
   return {
     level,
@@ -279,6 +326,8 @@ function parseLine(line: string): RawLine | null {
     isCompBinary,
     isGroup: false,
     initialValue,
+    parseWarning: unsupported.length ? `Unsupported: ${unsupported.join("; ")}` : null,
+    alphaOnly,
   };
 }
 
@@ -338,6 +387,8 @@ export function parseCopybook(source: string): ParsedField[] {
           kind: "GROUP",
           groupNote: `Redefines ${parsed.redefines}`,
           initialValue: null,
+          parseWarning: parsed.parseWarning,
+          alphaOnly: false,
         });
 
         offsetsByName.set(parsed.name.toUpperCase(), groupStart);
@@ -368,6 +419,8 @@ export function parseCopybook(source: string): ParsedField[] {
           kind: "GROUP",
           groupNote: parsed.level === 1 ? "Record Description" : null,
           initialValue: null,
+          parseWarning: parsed.parseWarning,
+          alphaOnly: false,
         });
 
         offsetsByName.set(parsed.name.toUpperCase(), shadowLevel !== null ? shadowCursor : cursor);
@@ -426,6 +479,8 @@ export function parseCopybook(source: string): ParsedField[] {
           : "NUMERIC",
       groupNote: null,
       initialValue: parsed.initialValue,
+      parseWarning: parsed.parseWarning,
+      alphaOnly: parsed.alphaOnly,
     });
   }
 
@@ -456,8 +511,11 @@ export function formatFieldValue(field: ParsedField, rawValue: string): string {
     return digits.slice(-field.length).padStart(field.length, "0");
   }
 
+  // PIC A: only letters and spaces are valid — drop anything else before padding.
+  const text = field.alphaOnly ? value.replace(/[^A-Za-z ]/g, "") : value;
+
   // Alphanumeric (X) fields: pad with trailing spaces, truncate if too long.
-  return value.slice(0, field.length).padEnd(field.length, " ");
+  return text.slice(0, field.length).padEnd(field.length, " ");
 }
 
 /** Total fixed-width byte length of the record described by a parsed copybook (REDEFINES overlaps don't add). */
@@ -526,11 +584,11 @@ export interface DecomposedField extends ParsedField {
 export function decomposeStream(fields: ParsedField[], stream: string): DecomposedField[] {
   return fields.map((field) => {
     if (field.isGroup) {
-      return { ...field, raw: "", value: "", warning: null };
+      return { ...field, raw: "", value: "", warning: field.parseWarning };
     }
 
     const available = stream.length - field.start;
-    let warning: string | null = null;
+    let warning: string | null = field.parseWarning;
 
     if (available < field.length) {
       warning = `Stream too short for field ${field.name}`;
@@ -544,6 +602,10 @@ export function decomposeStream(fields: ParsedField[], stream: string): Decompos
 
     const raw = extractFieldRaw(field, stream);
     let value: string;
+
+    if (field.alphaOnly && !warning && /[^A-Za-z ]/.test(raw)) {
+      warning = `Non-alphabetic data in PIC A field ${field.name}`;
+    }
 
     if (field.type === "S9") {
       const intLen = field.length - field.decimals;

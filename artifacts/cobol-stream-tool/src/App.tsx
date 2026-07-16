@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GenerateTab } from "@/components/generate-tab";
 import { DecomposeTab } from "@/components/decompose-tab";
 import { DelimiterExportTab } from "@/components/delimiter-export-tab";
+import { StripTab } from "@/components/strip-tab";
 import { parseCopybook } from "@/lib/cobol";
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/lib/settings-api";
@@ -118,10 +119,11 @@ function AppInner() {
                 </div>
               )}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3 max-w-[560px] mb-8">
+                <TabsList className="grid w-full grid-cols-4 max-w-[700px] mb-8">
                   <TabsTrigger value="generate">Generate</TabsTrigger>
                   <TabsTrigger value="decompose">Decompose</TabsTrigger>
                   <TabsTrigger value="delimiter-export">Delimiter Export</TabsTrigger>
+                  <TabsTrigger value="strip">Strip</TabsTrigger>
                 </TabsList>
                 <TabsContent value="generate" className="focus-visible:outline-none">
                   <GenerateTab
@@ -148,6 +150,10 @@ function AppInner() {
                     dataSource={delimData}
                     setDataSource={setDelimData}
                   />
+                </TabsContent>
+                {/* forceMount keeps Strip's state (source, options) alive across tab switches */}
+                <TabsContent value="strip" forceMount className="focus-visible:outline-none data-[state=inactive]:hidden">
+                  <StripTab />
                 </TabsContent>
               </Tabs>
             </main>

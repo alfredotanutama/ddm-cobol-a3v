@@ -1,0 +1,280 @@
+import { useMemo, useRef, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Upload, Clipboard, Copy, Download, Eraser } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { EmptyState } from "./empty-state";
+
+/** A line is a COBOL comment when column 7 (index 6) is '*' (or '/', also a comment indicator). */
+const isCommentLine = (line: string) => line.length >= 7 && (line[6] === "*" || line[6] === "/");
+
+/** Parses "1-6, 73-80, 15" into 1-based inclusive [from, to] ranges; invalid parts are ignored. */
+export function parseColumnRanges(spec: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const part of spec.split(/[,;\s]+/)) {
+    const m = part.match(/^(\d+)(?:\s*[-–]\s*(\d+))?$/);
+    if (!m) continue;
+    const from = parseInt(m[1], 10);
+    const to = m[2] ? parseInt(m[2], 10) : from;
+    if (from >= 1 && to >= from) ranges.push([from, to]);
+  }
+  return ranges;
+}
+
+/** Removes 1-based inclusive column ranges from a line (all ranges refer to ORIGINAL positions). */
+const cutColumns = (line: string, ranges: Array<[number, number]>): string => {
+  let out = "";
+  for (let i = 0; i < line.length; i++) {
+    const col = i + 1;
+    if (!ranges.some(([from, to]) => col >= from && col <= to)) out += line[i];
+  }
+  return out;
+};
+
+export function StripTab() {
+  const [source, setSource] = useState("");
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [cutSeqArea, setCutSeqArea] = useState(false); // columns 1-6 (sequence numbers)
+  const [cutIdArea, setCutIdArea] = useState(false); // columns 73-80 (identification area)
+  const [customCols, setCustomCols] = useState(""); // e.g. "8-12, 20"
+  const [dragOver, setDragOver] = useState(false);
+  const [cursorPos, setCursorPos] = useState<{ line: number; col: number } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const updateCursor = (el: HTMLTextAreaElement) => {
+    const before = el.value.slice(0, el.selectionStart);
+    const line = (before.match(/\n/g)?.length ?? 0) + 1;
+    const col = before.length - before.lastIndexOf("\n");
+    setCursorPos({ line, col });
+  };
+  const { toast } = useToast();
+
+  const { stripped, removed } = useMemo(() => {
+    if (!source) return { stripped: "", removed: 0 };
+    const lines = source.split(/\r?\n/);
+    let kept = lines.filter((l) => !isCommentLine(l));
+    const ranges: Array<[number, number]> = [
+      ...(cutSeqArea ? [[1, 6] as [number, number]] : []),
+      ...(cutIdArea ? [[73, 80] as [number, number]] : []),
+      ...parseColumnRanges(customCols),
+    ];
+    if (ranges.length) kept = kept.map((l) => cutColumns(l, ranges));
+    return { stripped: kept.join("\n"), removed: lines.length - kept.length };
+  }, [source, cutSeqArea, cutIdArea, customCols]);
+
+  const readFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      if (typeof ev.target?.result === "string") {
+        setSource(ev.target.result);
+        setFileName(file.name);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        toast({ title: "Clipboard is empty", variant: "destructive" });
+        return;
+      }
+      setSource(text);
+      setFileName(null);
+      toast({ title: "Pasted from clipboard" });
+    } catch {
+      toast({
+        title: "Couldn't read clipboard",
+        description: "Your browser may be blocking clipboard access. Try pasting directly into the field instead.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(stripped);
+      toast({ title: "Copied to clipboard" });
+    } catch {
+      toast({
+        title: "Couldn't copy to clipboard",
+        description: "Your browser may be blocking clipboard access.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([stripped + "\n"], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    const now = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${p(now.getMonth() + 1)}${p(now.getDate())}${String(now.getFullYear()).slice(-2)}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+    const base = fileName ? fileName.replace(/\.[^.]+$/, "") : null;
+    a.download = base ? `Stripped_${base}_${stamp}.txt` : `stripped_${stamp}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast({ title: "Strip", description: `${removed} comment line${removed === 1 ? "" : "s"} removed.` });
+  };
+
+  const clearAll = () => {
+    setSource("");
+    setFileName(null);
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card>
+        <CardContent className="pt-6">
+          <div
+            className={`flex flex-col gap-2 rounded-md border border-dashed p-3 transition-colors ${
+              dragOver ? "border-primary bg-primary/5" : "border-transparent"
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              readFile(e.dataTransfer.files?.[0]);
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1">
+                {cursorPos && (
+                  <span className="w-fit text-[11px] font-mono px-1.5 py-0.5 rounded bg-black text-green-400">
+                    Ln {cursorPos.line}, Col {cursorPos.col}
+                  </span>
+                )}
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium">Source</Label>
+                  {fileName && (
+                    <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{fileName}</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handlePaste}>
+                  <Clipboard className="w-3 h-3 mr-1.5" />
+                  Paste
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => fileRef.current?.click()}>
+                  <Upload className="w-3 h-3 mr-1.5" />
+                  Upload .txt
+                </Button>
+                <input
+                  type="file"
+                  ref={fileRef}
+                  className="hidden"
+                  accept=".txt,.cbl,.cob,.cpy"
+                  onChange={(e) => {
+                    readFile(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearAll} disabled={!source}>
+                  <Eraser className="w-3 h-3 mr-1.5" />
+                  Clear
+                </Button>
+              </div>
+            </div>
+            <Textarea
+              className="font-mono text-xs resize-y min-h-[420px] whitespace-pre overflow-x-auto"
+              wrap="off"
+              value={source}
+              onChange={(e) => {
+                setSource(e.target.value);
+                setFileName(null);
+                updateCursor(e.target);
+              }}
+              onSelect={(e) => updateCursor(e.currentTarget)}
+              onBlur={() => setCursorPos(null)}
+              placeholder={"Paste, upload, or drag & drop COBOL source here.\nLines with * (or /) in column 7 will be stripped."}
+              spellCheck={false}
+            />
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-1">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="cut-seq"
+                  checked={cutSeqArea}
+                  onCheckedChange={(v) => setCutSeqArea(v === true)}
+                />
+                <Label htmlFor="cut-seq" className="text-[11px] font-normal text-muted-foreground leading-snug cursor-pointer">
+                  Remove columns 1–6 (sequence area)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="cut-id"
+                  checked={cutIdArea}
+                  onCheckedChange={(v) => setCutIdArea(v === true)}
+                />
+                <Label htmlFor="cut-id" className="text-[11px] font-normal text-muted-foreground leading-snug cursor-pointer">
+                  Remove columns 73–80 (identification area)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="cut-custom" className="text-[11px] font-normal text-muted-foreground leading-snug whitespace-nowrap">
+                  Custom columns:
+                </Label>
+                <Input
+                  id="cut-custom"
+                  className="h-7 w-40 text-[11px] font-mono"
+                  value={customCols}
+                  onChange={(e) => setCustomCols(e.target.value)}
+                  placeholder="e.g. 8-12, 20"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6">
+          {!source ? (
+            <EmptyState>The stripped source (comment lines removed) will appear here.</EmptyState>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium">Stripped Result</Label>
+                  <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    {removed} comment line{removed === 1 ? "" : "s"} removed
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleCopy}>
+                    <Copy className="w-3 h-3 mr-1.5" />
+                    Copy
+                  </Button>
+                  <Button size="sm" className="h-7 text-xs" onClick={handleDownload}>
+                    <Download className="w-3 h-3 mr-1.5" />
+                    Download .txt
+                  </Button>
+                </div>
+              </div>
+              <Textarea
+                className="font-mono text-xs resize-y min-h-[420px] whitespace-pre overflow-x-auto"
+              wrap="off"
+                value={stripped}
+                readOnly
+                spellCheck={false}
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Trash2, Upload, CheckCircle2, Binary } from "lucide-react";
+import { Download, Trash2, Upload, CheckCircle2, Binary, Clipboard } from "lucide-react";
 
 function FileUpload({
   label,
@@ -69,10 +69,33 @@ function FileUpload({
     >
       <Label>{label}</Label>
       <input type="file" hidden ref={ref} onChange={handleFile} />
-      <Button variant="outline" size="sm" className="w-fit h-8 text-xs" onClick={() => ref.current?.click()}>
-        <Upload className="w-3 h-3 mr-1.5" />
-        Upload file
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" className="w-fit h-8 text-xs" onClick={() => ref.current?.click()}>
+          <Upload className="w-3 h-3 mr-1.5" />
+          Upload file
+        </Button>
+        {onLoadText && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-fit h-8 text-xs"
+            onClick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                  onLoadText(text, "");
+                  setFileName("");
+                }
+              } catch {
+                /* clipboard blocked -- upload/drop still work */
+              }
+            }}
+          >
+            <Clipboard className="w-3 h-3 mr-1.5" />
+            Paste
+          </Button>
+        )}
+      </div>
       <p className="text-[11px] text-muted-foreground/70">or drag &amp; drop here</p>
       {loaded && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -229,6 +252,16 @@ export function DelimiterExportTab({
                 setExcluded(new Set());
               }}
             />
+            {copybookSource.trim().length > 0 && (
+              <details className="mt-2">
+                <summary className="text-[11px] text-muted-foreground cursor-pointer select-none">
+                  Preview copybook
+                </summary>
+                <pre className="mt-1.5 max-h-64 overflow-auto rounded bg-muted p-2 font-mono text-[11px] leading-snug whitespace-pre">
+                  {copybookSource}
+                </pre>
+              </details>
+            )}
             {binaryMode && (
               <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <Binary className="w-3.5 h-3.5" />

@@ -113,9 +113,32 @@ export function decodeBinaryField(
   }
 
   if (!field.isComp3) {
+    if (field.type === "S9") {
+      // Zoned decimal (PIC S9 DISPLAY) in EBCDIC: digit = low nibble of each
+      // byte, sign = zone nibble of the LAST byte (C/A/E/F = +, D/B = −).
+      let warning: string | null = null;
+      let digits = "";
+      for (const b of bytes) {
+        const d = b & 0x0f;
+        if (d > 9) {
+          if (!warning) warning = `Invalid zoned digit 0x${d.toString(16).toUpperCase()} in ${field.name}`;
+          digits += "0";
+        } else {
+          digits += String(d);
+        }
+      }
+      const zone = bytes.length ? bytes[bytes.length - 1] >> 4 : 0x0f;
+      if (zone <= 9) warning = `Invalid sign zone 0x${zone.toString(16).toUpperCase()} in ${field.name}`;
+      const negative = zone === 0x0d || zone === 0x0b;
+      return { value: formatDigits(field, digits, negative), warning };
+    }
     let out = "";
     for (const b of bytes) out += ebcdicToAscii(b);
-    return { value: out, warning: null };
+    const warning =
+      field.alphaOnly && /[^A-Za-z ]/.test(out)
+        ? `Non-alphabetic data in PIC A field ${field.name}`
+        : null;
+    return { value: out, warning };
   }
 
   const nibbles: number[] = [];
@@ -192,6 +215,10 @@ export function decomposeBinaryRecords(
   const warnings: string[] = [];
   let skippedZeroRecords = 0;
 
+  for (const f of fields) {
+    if (f.parseWarning) warnings.push(`${f.name}: ${f.parseWarning}`);
+  }
+
   if (recordLength === 0) {
     return { records, warnings, recordLength, skippedZeroRecords, leftoverBytes: data.length };
   }
@@ -214,11 +241,11 @@ export function decomposeBinaryRecords(
     }
     records.push(
       fields.map((field) => {
-        if (field.isGroup) return { ...field, raw: "", value: "", warning: null };
+        if (field.isGroup) return { ...field, raw: "", value: "", warning: field.parseWarning };
         const loc = byId.get(field.id)!;
         const slice = rec.subarray(loc.byteStart, loc.byteStart + loc.byteLength);
         const { value, warning } = decodeBinaryField(field, slice);
-        return { ...field, raw: toHex(slice), value, warning };
+        return { ...field, raw: toHex(slice), value, warning: warning ?? field.parseWarning };
       }),
     );
   }
