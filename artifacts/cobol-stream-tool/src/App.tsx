@@ -11,6 +11,7 @@ import { DecomposeTab } from "@/components/decompose-tab";
 import { DelimiterExportTab } from "@/components/delimiter-export-tab";
 import { StripTab } from "@/components/strip-tab";
 import { MqParseTab } from "@/components/mq-parse-tab";
+import { DecodeetoTab } from "@/components/decodeeto-tab";
 import { parseCopybook } from "@/lib/cobol";
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/lib/settings-api";
@@ -120,12 +121,13 @@ function AppInner() {
                 </div>
               )}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-5 max-w-[840px] mb-8">
+                <TabsList className="grid w-full grid-cols-6 max-w-[1000px] mb-8">
                   <TabsTrigger value="generate">Generate</TabsTrigger>
                   <TabsTrigger value="decompose">Decompose</TabsTrigger>
                   <TabsTrigger value="delimiter-export">Delimiter Export</TabsTrigger>
                   <TabsTrigger value="strip">Strip</TabsTrigger>
                   <TabsTrigger value="mq-parse">Parse Message</TabsTrigger>
+                  <TabsTrigger value="decodeeto">To DECODEETO</TabsTrigger>
                 </TabsList>
                 <TabsContent value="generate" className="focus-visible:outline-none">
                   <GenerateTab
@@ -160,6 +162,10 @@ function AppInner() {
                 {/* forceMount keeps MQ Parse's state alive across tab switches */}
                 <TabsContent value="mq-parse" forceMount className="focus-visible:outline-none data-[state=inactive]:hidden">
                   <MqParseTab />
+                </TabsContent>
+
+                <TabsContent value="decodeeto" forceMount className="focus-visible:outline-none data-[state=inactive]:hidden">
+                  <DecodeetoTab />
                 </TabsContent>
               </Tabs>
             </main>

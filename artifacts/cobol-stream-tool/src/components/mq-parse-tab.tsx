@@ -26,15 +26,22 @@ export function MqParseTab() {
   const [header, setHeader] = useState("");
   const [cbFields, setCbFields] = useState<ParsedField[]>([]);
   const [previewFiller, setPreviewFiller] = useState(false);
+  const [parseAsDump, setParseAsDump] = useState(true);
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  const { messages, skipped } = useMemo(
-    () => (source ? parseMqDump(source) : { messages: [], skipped: 0 }),
-    [source],
-  );
+  const { messages, skipped } = useMemo(() => {
+    if (!source) return { messages: [], skipped: 0 };
+    if (parseAsDump) return parseMqDump(source);
+    // "As-is": each non-empty line is a message body verbatim, no MQ parsing.
+    const messages = source
+      .split(/\r?\n/)
+      .filter((l) => l.length > 0)
+      .map((decoded, i) => ({ index: i + 1, ccsid: null, bytes: new Uint8Array(), decoded, warning: null }));
+    return { messages, skipped: 0 };
+  }, [source, parseAsDump]);
   const output = useMemo(() => {
     const body = messages.map((m) => m.decoded).join("\n");
     return header.trim() ? `${header.trim()}\n${body}` : body;
@@ -245,42 +252,53 @@ export function MqParseTab() {
                     {messages.length} message{messages.length === 1 ? "" : "s"}
                     {skipped > 0 ? `, ${skipped} skipped` : ""}
                   </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleCopy} disabled={!output}>
-                    <Copy className="w-3 h-3 mr-1.5" />
-                    Copy
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button size="sm" className="h-7 text-xs" disabled={!output}>
-                        <Download className="w-3 h-3 mr-1.5" />
-                        Download
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem className="text-xs" onClick={() => handleDownload("txt")}>
-                        .txt — decoded messages as-is
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="text-xs" onClick={() => handleDownload("csv")}>
-                        .csv — split per copybook field
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="flex items-center gap-1.5">
+                    <Checkbox
+                      id="parse-as-dump"
+                      checked={parseAsDump}
+                      onCheckedChange={(v) => setParseAsDump(v === true)}
+                    />
+                    <Label htmlFor="parse-as-dump" className="text-[11px] font-normal text-muted-foreground cursor-pointer whitespace-nowrap">
+                      Parse
+                    </Label>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Label htmlFor="mq-header" className="text-[11px] font-normal text-muted-foreground whitespace-nowrap">
                   Add header:
                 </Label>
                 <Input
                   id="mq-header"
-                  className="h-7 text-[11px] font-mono"
+                  className="h-7 text-[11px] font-mono flex-1 min-w-[220px]"
                   value={header}
                   onChange={(e) => setHeader(e.target.value)}
                   placeholder="optional — added as the first line"
                   spellCheck={false}
                 />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={async () => {
+                    try {
+                      const text = await navigator.clipboard.readText();
+                      if (text) setHeader(text.split(/\r?\n/)[0]);
+                      else toast({ title: "Clipboard is empty", variant: "destructive" });
+                    } catch {
+                      toast({ title: "Couldn't read clipboard", variant: "destructive" });
+                    }
+                  }}
+                >
+                  <Clipboard className="w-3 h-3 mr-1.5" />
+                  Paste
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleCopy} disabled={!output}>
+                  <Copy className="w-3 h-3 mr-1.5" />
+                  Copy
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -302,23 +320,22 @@ export function MqParseTab() {
                 >
                   Import from Strip
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={async () => {
-                    try {
-                      const text = await navigator.clipboard.readText();
-                      if (text) setHeader(text.split(/\r?\n/)[0]);
-                      else toast({ title: "Clipboard is empty", variant: "destructive" });
-                    } catch {
-                      toast({ title: "Couldn't read clipboard", variant: "destructive" });
-                    }
-                  }}
-                >
-                  <Clipboard className="w-3 h-3 mr-1.5" />
-                  Paste
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" className="h-7 text-xs" disabled={!output}>
+                      <Download className="w-3 h-3 mr-1.5" />
+                      Download
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem className="text-xs" onClick={() => handleDownload("txt")}>
+                      .txt — decoded messages as-is
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-xs" onClick={() => handleDownload("csv")}>
+                      .csv — split per copybook field
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
               {headerInfo && (
                 <div className="flex flex-col gap-1">
