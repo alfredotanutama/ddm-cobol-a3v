@@ -127,6 +127,8 @@ export function DelimiterExportTab({
   const [ignorePadding, setIgnorePadding] = useState(false);
   // Export numeric fields as plain numbers (123.45) instead of raw fixed-width (00123.45).
   const [numbersAsNumber, setNumbersAsNumber] = useState(false);
+  // Name of the uploaded record file — only used to warn on a .dat/.txt mismatch.
+  const [dataFileName, setDataFileName] = useState("");
 
   const fields = useMemo(() => {
     try {
@@ -199,6 +201,18 @@ export function DelimiterExportTab({
     return first.map((f, i) => ({ id: f.id, name: f.name, pic: f.picRaw, first: f.value, last: last[i]?.value ?? "" }));
   }, [ready, rows]);
 
+  // Extension vs copybook check. Advisory only — the name doesn't prove the content,
+  // so a mismatch warns but never blocks the export.
+  const isDatFile = dataFileName.toLowerCase().endsWith(".dat");
+  const extensionWarning =
+    !dataFileName || fields.length === 0
+      ? ""
+      : binaryMode && !isDatFile
+      ? `Copybook has COMP-3 / COMP fields, but "${dataFileName}" isn't a .dat file. Packed bytes get corrupted when the dataset is transferred as text — export the record file as binary (.dat, RECFM=FB, no ASCII conversion).`
+      : !binaryMode && isDatFile
+      ? `No COMP-3 in the copybook, so "${dataFileName}" is read as plain text (one line per record). If the file really is binary, the copybook is missing its COMP-3 fields.`
+      : "";
+
   const handleDownload = () => {
     const blob = new Blob([delimitRows(fields, csvRows, delimiter, excluded).join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -217,6 +231,7 @@ export function DelimiterExportTab({
     setCopybookSource("");
     setDataSource(null);
     setExcluded(new Set());
+    setDataFileName("");
     setIgnorePadding(false);
     setNumbersAsNumber(false);
     toast({ title: "Cleared", description: "Delimiter Export tab data has been reset." });
@@ -282,8 +297,21 @@ export function DelimiterExportTab({
                   ? `${dataSource.length} bytes — upload a copybook to decode`
                   : "file is empty"
               }
-              onLoadBytes={(bytes) => setDataSource(bytes)}
+              onLoadBytes={(bytes, fileName) => {
+                setDataSource(bytes);
+                setDataFileName(fileName);
+              }}
             />
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              {fields.length === 0
+                ? "Upload a copybook first — it decides whether this file must be binary (.dat) or plain text (.txt)."
+                : binaryMode
+                ? "Copybook contains COMP-3 / COMP fields — this file must be binary (.dat)."
+                : "No COMP-3 in the copybook — a plain text file (.txt) is fine."}
+            </p>
+            {extensionWarning && (
+              <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-500">{extensionWarning}</p>
+            )}
             {binaryMode && (
               <div className="mt-2 flex items-start gap-2">
                 <Checkbox
