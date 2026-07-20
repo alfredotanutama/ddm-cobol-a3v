@@ -71,11 +71,9 @@ export function DecodeetoTab() {
     const blob = new Blob([output + "\n"], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    const now = new Date();
-    const p = (n: number) => String(n).padStart(2, "0");
-    const stamp = `${p(now.getMonth() + 1)}${p(now.getDate())}${String(now.getFullYear()).slice(-2)}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
-    const base = fileName ? fileName.replace(/\.[^.]+$/, "") : null;
-    a.download = base ? `pre-template_${base}_${stamp}.txt` : `pre-template_${stamp}.txt`;
+    // DECODEETO only ever reads this exact filename from its own folder, so a
+    // source-stamped name would have to be renamed by hand before every load.
+    a.download = "pre-template-decodee.txt";
     a.click();
     URL.revokeObjectURL(a.href);
     toast({ title: "DECODEETO", description: `${fieldCount} field${fieldCount === 1 ? "" : "s"} exported.` });

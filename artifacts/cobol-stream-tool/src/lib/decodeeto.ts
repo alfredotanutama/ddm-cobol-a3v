@@ -10,6 +10,14 @@ import type { ParsedField } from "./cobol.ts";
 
 export const PRE_TEMPLATE_HEADER = "# LABEL:LEN:VISIBLE:TYPE=DEFAULT   (# lines are ignored)";
 
+// DECODEETO splits the template into a block emitted before the layout output
+// and one emitted after. Fields land in whichever block is open, so all of ours
+// go between the markers; nothing follows #TEMPLATE-END. A marker-less file
+// still parses (everything falls into the start block), but being explicit
+// means the file survives being pasted into an existing template.
+export const TEMPLATE_START = "#TEMPLATE-START";
+export const TEMPLATE_END = "#TEMPLATE-END";
+
 const NUMERIC_KINDS = new Set(["NUMERIC", "DECIMAL", "SIGNED", "SIGNED_DEC"]);
 
 /** Fields that occupy their own bytes in the record (skips groups and REDEFINES overlays). */
@@ -25,5 +33,5 @@ export function toPreTemplate(fields: ParsedField[]): string {
       const def = f.initialValue != null ? `="${f.initialValue}"` : "";
       return `${f.name}:${f.length}:${visible}:${type}${def}`;
     });
-  return [PRE_TEMPLATE_HEADER, ...lines].join("\n");
+  return [PRE_TEMPLATE_HEADER, TEMPLATE_START, ...lines, TEMPLATE_END].join("\n");
 }
