@@ -1,10 +1,14 @@
-import { useMemo } from "react";
-import { parseCopybook, generateStream, getRecordLength } from "@/lib/cobol";
+import { useMemo, useState } from "react";
+import { parseCopybook, generateStream, getRecordLength, fillerFillValue } from "@/lib/cobol";
+import type { ParsedField } from "@/lib/cobol";
 import { FileTextarea } from "./file-textarea";
 import { EmptyState } from "./empty-state";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Copy, Download, Trash2, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,6 +26,18 @@ export function GenerateTab({
 }) {
   const { toast } = useToast();
 
+  // FILLER rows are read-only by default. Ticking this turns them into normal
+  // inputs and enables the fill-character picker below.
+  const [fillerEditable, setFillerEditable] = useState(false);
+  const [fillerMode, setFillerMode] = useState("spaces"); // spaces | , | ; | custom
+  const [fillerCustom, setFillerCustom] = useState("");
+  const fillerChar =
+    !fillerEditable || fillerMode === "spaces"
+      ? ""
+      : fillerMode === "custom"
+      ? fillerCustom
+      : fillerMode;
+
   const fields = useMemo(() => {
     try {
       return parseCopybook(copybookSource);
@@ -30,14 +46,28 @@ export function GenerateTab({
     }
   }, [copybookSource]);
 
+  const fillerFill = (f: ParsedField) => fillerFillValue(f, fillerChar);
+
+  // Derived, not stored: the picker stays live and Clear Values can't strand
+  // a filler holding an old fill char.
+  const effectiveValues = useMemo(() => {
+    if (!fillerChar) return values;
+    const next = { ...values };
+    for (const f of fields) {
+      const fill = fillerFill(f);
+      if (fill !== null && next[f.id] === undefined) next[f.id] = fill;
+    }
+    return next;
+  }, [fields, values, fillerChar]);
+
   const stream = useMemo(() => {
     if (!fields.length) return "";
     try {
-      return generateStream(fields, values);
+      return generateStream(fields, effectiveValues);
     } catch (e) {
       return "";
     }
-  }, [fields, values]);
+  }, [fields, effectiveValues]);
 
   const recordLength = useMemo(() => getRecordLength(fields), [fields]);
 
@@ -116,6 +146,40 @@ export function GenerateTab({
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold">Field Values</h3>
                 <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5 mr-1">
+                    <Checkbox
+                      id="filler-editable"
+                      checked={fillerEditable}
+                      onCheckedChange={(v) => setFillerEditable(v === true)}
+                    />
+                    <Label htmlFor="filler-editable" className="text-xs text-muted-foreground cursor-pointer">
+                      Filler editable
+                    </Label>
+                  </div>
+                  {fillerEditable && (
+                    <div className="flex items-center gap-1.5 mr-1">
+                      <Select value={fillerMode} onValueChange={setFillerMode}>
+                        <SelectTrigger className="h-7 w-[110px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="spaces" className="text-xs">Spaces</SelectItem>
+                          <SelectItem value="," className="text-xs">Comma ,</SelectItem>
+                          <SelectItem value=";" className="text-xs">Semicolon ;</SelectItem>
+                          <SelectItem value="custom" className="text-xs">Custom…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {fillerMode === "custom" && (
+                        <Input
+                          value={fillerCustom}
+                          onChange={(e) => setFillerCustom(e.target.value.slice(0, 1))}
+                          maxLength={1}
+                          placeholder="?"
+                          className="h-7 w-10 text-center text-xs font-mono"
+                        />
+                      )}
+                    </div>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -157,10 +221,10 @@ export function GenerateTab({
                           {f.isGroup && f.groupNote && (
                             <span className="text-xs italic text-muted-foreground">{f.groupNote}</span>
                           )}
-                          {!f.isGroup && (!f.isFiller || f.initialValue !== null) && f.length > 0 && (
+                          {!f.isGroup && f.length > 0 && (!f.isFiller || f.initialValue !== null || fillerEditable) && (
                             <Input
                               className="h-7 text-xs font-mono"
-                              value={values[f.id] ?? f.initialValue ?? ""}
+                              value={values[f.id] ?? fillerFill(f) ?? f.initialValue ?? ""}
                               onChange={(e) => {
                                 let next = e.target.value;
                                 if (f.kind === "NUMERIC") {
@@ -188,7 +252,9 @@ export function GenerateTab({
                               }
                             />
                           )}
-                          {!f.isGroup && f.isFiller && f.initialValue === null && <span className="text-xs italic text-muted-foreground">Filler</span>}
+                          {!f.isGroup && f.isFiller && f.initialValue === null && !fillerEditable && (
+                            <span className="text-xs italic text-muted-foreground">Filler</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

@@ -518,6 +518,20 @@ export function formatFieldValue(field: ParsedField, rawValue: string): string {
   return text.slice(0, field.length).padEnd(field.length, " ");
 }
 
+/**
+ * The value an unvalued FILLER takes when the Generate tab's fill-character
+ * picker is set, or null when the field must be left alone.
+ *
+ * Only PIC X fillers qualify: formatFieldValue() strips non-digits from PIC 9
+ * (a ',' fill would land as '000') and non-letters from PIC A, so filling those
+ * would quietly write something other than what the picker shows.
+ */
+export function fillerFillValue(field: ParsedField, char: string): string | null {
+  if (!char || !field.isFiller || field.initialValue !== null) return null;
+  if (field.type !== "X" || field.alphaOnly) return null;
+  return char.repeat(field.length);
+}
+
 /** Total fixed-width byte length of the record described by a parsed copybook (REDEFINES overlaps don't add). */
 export function getRecordLength(fields: ParsedField[]): number {
   return fields.reduce((max, f) => Math.max(max, f.start + f.length), 0);
